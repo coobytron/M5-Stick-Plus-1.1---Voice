@@ -6,7 +6,7 @@ How it works, and why, is in [docs/DESIGN.md](docs/DESIGN.md). Goals and open qu
 
 This repository also holds a second, free firmware: a **dictation recorder** that streams what you say to your Mac, which transcribes it locally with Whisper. It lives in `firmware/` and `mac/`; see [docs/DICTATION.md](docs/DICTATION.md).
 
-And a third project: the **voice pen**, a click-to-record pen with an e-ink window and a 3D-printed body with a clip, built on a Seeed XIAO ESP32-S3 Sense. It uses the same Mac receiver for transcription. It lives in `pen/`; see [docs/PEN.md](docs/PEN.md).
+The **voice pen**, a click-to-record pen with an e-ink window and a 3D-printed body that uses the same Mac receiver, now lives on its own [`voice-pen` branch](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/tree/voice-pen).
 
 ## Use it
 
