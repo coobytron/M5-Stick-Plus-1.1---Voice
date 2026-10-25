@@ -9,26 +9,51 @@ M5StickC Plus  --Wi-Fi audio stream-->  Mac (Whisper)  -->  Apple Notes / iCloud
 ## Roadmap
 
 1. **Recording firmware** (done): button A starts and stops, audio streams to the Mac as you talk.
-2. **Mac receiver with Whisper**: transcribe each recording locally.
+2. **Mac receiver with Whisper** (done): each recording is transcribed locally and saved as a text file.
 3. **Delivery**: save transcripts to Apple Notes or iCloud Drive so they sync to iPhone.
 4. **Polish**: on-device Wi-Fi setup, battery handling, an M5Burner-flashable .bin.
 
-## Step 1: try the firmware
+## Setup
 
-You need [PlatformIO](https://platformio.org/install/cli) (`brew install platformio`) and Python 3 on your Mac.
+You need a Mac with [Homebrew](https://brew.sh), and the Stick on the same Wi-Fi.
+
+### 1. Install the tools (once)
+
+```sh
+brew install platformio whisper-cpp
+```
+
+### 2. Flash the Stick
 
 1. Copy `firmware/src/secrets.example.h` to `firmware/src/secrets.h` and put in your Wi-Fi name and password.
-2. Plug in the Stick and flash it:
+2. Plug in the Stick and run:
    ```sh
    cd firmware
    pio run -t upload
    ```
-3. Start the test receiver on your Mac (same Wi-Fi as the Stick):
-   ```sh
-   python3 tools/test_receiver.py --out ~/Desktop/dictation
-   ```
-   The first time, macOS asks whether Python may accept incoming connections. Click Allow.
-4. The Stick shows **Ready** once it finds the Mac. Press **A** (the big front button), talk, and press **A** again. A `.wav` file appears in the folder. Listen to it to check the mic level.
+
+### 3. Start the receiver on your Mac
+
+```sh
+python3 mac/receiver.py
+```
+
+The first run downloads the Whisper speech model (about 470 MB), and macOS asks whether Python may accept incoming connections. Click **Allow**.
+
+### 4. Dictate
+
+The Stick shows **Ready** once it finds the Mac. Press **A** (the big front button), talk, and press **A** again. A few seconds later a notification pops up on the Mac, and the transcript is saved in `~/Dictation` as a text file named by date and time.
+
+### Receiver options
+
+| Option | What it does |
+| --- | --- |
+| `--out FOLDER` | Where transcripts go (default `~/Dictation`) |
+| `--model NAME` | `base.en` (fastest), `small.en` (default), `medium.en`, or `large-v3-turbo` (best; multilingual; use on Apple Silicon) |
+| `--language CODE` | Spoken language for multilingual models, e.g. `es`. Default is auto-detect |
+| `--keep-audio` | Keep the .wav recordings in `~/.m5dictation/recordings/done` |
+
+If a transcription fails or the receiver is closed before it finishes, the audio stays in `~/.m5dictation/recordings` and is transcribed the next time the receiver starts.
 
 ### On the Stick
 
@@ -43,7 +68,7 @@ You need [PlatformIO](https://platformio.org/install/cli) (`brew install platfor
 ### Troubleshooting
 
 - **Stuck on "Find Mac"**: some routers block Bonjour. Set `DICTATION_HOST` in `secrets.h` to your Mac's IP (System Settings > Wi-Fi > Details).
-- **Recording too quiet or distorted**: change `kMicGain` in `firmware/src/main.cpp` (default 8).
+- **Transcripts miss words**: try `--keep-audio` and listen to the .wav. If it's too quiet or distorted, change `kMicGain` in `firmware/src/main.cpp` (default 8). If the audio is fine, try a bigger `--model`.
 - **"weak Wi-Fi" while recording**: the Stick's buffer is filling faster than Wi-Fi can send, so some audio may be lost. Move closer to the router.
 
 ## How audio is sent
