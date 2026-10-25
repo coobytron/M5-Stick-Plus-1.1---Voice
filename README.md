@@ -4,6 +4,8 @@ Hold a button, say something, and read it back translated. Firmware for the M5St
 
 How it works, and why, is in [docs/DESIGN.md](docs/DESIGN.md). Goals and open questions are in [docs/PROJECT-BRIEF.md](docs/PROJECT-BRIEF.md).
 
+This repository also holds a second, free firmware: a **dictation recorder** that streams what you say to your Mac, which transcribes it locally with Whisper. It lives in `firmware/` and `mac/`; see [docs/DICTATION.md](docs/DICTATION.md).
+
 ## Use it
 
 | Button | Does |

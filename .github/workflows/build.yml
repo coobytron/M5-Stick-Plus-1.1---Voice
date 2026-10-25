@@ -22,3 +22,24 @@ jobs:
       - run: pio run
       - name: Report size
         run: pio run -t size | tail -n 5
+
+  dictation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-dictation-${{ hashFiles('firmware/platformio.ini') }}
+      - run: pip install platformio
+      - name: Use placeholder secrets
+        run: cp src/secrets.example.h src/secrets.h
+      - run: pio run
+      - name: Check the Mac receiver parses
+        run: python -m py_compile ../mac/receiver.py

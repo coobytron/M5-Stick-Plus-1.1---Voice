@@ -9,6 +9,13 @@ Keep plans, specs and decisions as Markdown in this repository so the next sessi
 
 ## Project facts
 
+The repository holds two separate firmwares for the same stick:
+
+- **Translator** (root `platformio.ini`, `src/`, `include/`): records a phrase, transcribes and translates it with cloud APIs. Docs: `docs/DESIGN.md`, `docs/PROJECT-BRIEF.md`.
+- **Dictation recorder** (`firmware/`, `mac/`): streams audio over Wi-Fi to a Mac receiver that transcribes locally with whisper.cpp, free. Plan and setup: `docs/DICTATION.md`; its secrets live in `firmware/src/secrets.h` (git-ignored). Update `docs/DICTATION.md` in the same PR as any change to it.
+
+Translator facts:
+
 - Target: M5StickC Plus 1.1 (ESP32-PICO-D4, no PSRAM, PDM mic on G0/G34, ST7789 135 x 240).
 - Build: PlatformIO, `pio run`. Flash: `pio run -t upload`. CI builds every push.
 - Secrets live in `include/secrets.h`, which is git-ignored. Never commit keys.
