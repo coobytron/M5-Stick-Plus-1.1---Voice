@@ -8,6 +8,7 @@ whisper.cpp, and saves each transcript as a text file. Nothing leaves your Mac.
     python3 mac/receiver.py                       # transcripts in ~/Dictation
     python3 mac/receiver.py --out ~/Desktop/notes
     python3 mac/receiver.py --model large-v3-turbo   # better, needs Apple Silicon
+    python3 mac/receiver.py --no-notes            # text files only, skip Apple Notes
 
 Only the Python standard library is used. The Whisper model is downloaded the
 first time it's needed.
@@ -15,6 +16,7 @@ first time it's needed.
 
 import argparse
 import datetime
+import html
 import pathlib
 import queue
 import shutil
@@ -196,16 +198,57 @@ def transcribe(whisper, model, language, wav_path):
     return " ".join(line.strip() for line in text.splitlines() if line.strip())
 
 
-def save_transcript(out_dir, wav_path, seconds, text):
+def describe(wav_path, seconds):
+    """Returns a line like "Sunday 25 October 2026 at 03:29 (1:05)"."""
     when = datetime.datetime.strptime(wav_path.stem[:29], "dictation_%Y-%m-%d_%H-%M-%S")
+    mins, secs = divmod(round(seconds), 60)
+    return when, f"{when:%A %d %B %Y at %H:%M} ({mins}:{secs:02d})"
+
+
+def save_transcript(out_dir, wav_path, seconds, text):
+    when, info = describe(wav_path, seconds)
     path = out_dir / f"{when:%Y-%m-%d %H.%M.%S} dictation.txt"
     n = 2
     while path.exists():  # several recordings from the same second
         path = out_dir / f"{when:%Y-%m-%d %H.%M.%S} dictation {n}.txt"
         n += 1
-    mins, secs = divmod(round(seconds), 60)
-    path.write_text(f"Dictation, {when:%A %d %B %Y at %H:%M} ({mins}:{secs:02d})\n\n{text}\n")
+    path.write_text(f"Dictation, {info}\n\n{text}\n")
     return path
+
+
+# Values arrive as arguments rather than being pasted into the script, so a
+# transcript can never be run as AppleScript.
+NOTES_SCRIPT = """
+on run argv
+    set folderName to item 1 of argv
+    set noteBody to item 2 of argv
+    tell application "Notes"
+        set acct to default account
+        if not (exists folder folderName of acct) then
+            make new folder at acct with properties {name:folderName}
+        end if
+        make new note at folder folderName of acct with properties {body:noteBody}
+    end tell
+end run
+"""
+
+
+def note_title(text, words=8):
+    parts = text.split()
+    title = " ".join(parts[:words])
+    return title + "..." if len(parts) > words else title
+
+
+def save_to_notes(folder, wav_path, seconds, text):
+    """Adds the transcript to Apple Notes, which syncs it to iPhone via iCloud."""
+    _, info = describe(wav_path, seconds)
+    body = (f"<h1>{html.escape(note_title(text))}</h1>"
+            f"<p><i>Dictated {html.escape(info)}</i></p>"
+            f"<p>{html.escape(text)}</p>")
+    script = [arg for line in NOTES_SCRIPT.strip().splitlines() for arg in ("-e", line.strip())]
+    result = subprocess.run(["osascript", *script, folder, body], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "osascript failed")
 
 
 def notify(title, message):
@@ -219,7 +262,7 @@ def notify(title, message):
     )
 
 
-def transcribe_worker(whisper, model, language, out_dir, keep_audio):
+def transcribe_worker(whisper, model, language, out_dir, keep_audio, notes_folder):
     while True:
         job = jobs.get()
         wav_path, seconds = job.path, job.seconds
@@ -231,6 +274,14 @@ def transcribe_worker(whisper, model, language, out_dir, keep_audio):
                 path = save_transcript(out_dir, wav_path, seconds, text)
                 log(f"saved {path}")
                 print(f"\n{text}\n", flush=True)
+                if notes_folder:
+                    try:
+                        save_to_notes(notes_folder, wav_path, seconds, text)
+                        log(f"added to Notes folder '{notes_folder}'")
+                    except Exception as e:
+                        # The text file is already saved, so don't retry the transcription.
+                        log(f"couldn't add to Notes ({e}); the text file is still saved")
+                        notify("Dictation saved, Notes failed", str(e)[:120])
                 notify("Dictation ready", text[:120])
             else:
                 log("no speech found")
@@ -274,6 +325,10 @@ def main():
                         help="Whisper model: base.en, small.en (default), medium.en, large-v3-turbo")
     parser.add_argument("--language", default=None,
                         help="spoken language code, e.g. en, es (default: en for .en models, else auto)")
+    parser.add_argument("--notes-folder", default="Dictation",
+                        help="Apple Notes folder for transcripts (default Dictation)")
+    parser.add_argument("--no-notes", action="store_true",
+                        help="don't add transcripts to Apple Notes, only save text files")
     parser.add_argument("--keep-audio", action="store_true",
                         help="keep .wav files after a successful transcript")
     args = parser.parse_args()
@@ -283,6 +338,13 @@ def main():
     StickHandler.audio_dir = HOME / "recordings"
     StickHandler.audio_dir.mkdir(parents=True, exist_ok=True)
     language = args.language or ("en" if args.model.endswith(".en") else "auto")
+
+    notes_folder = None
+    if not args.no_notes:
+        if shutil.which("osascript"):
+            notes_folder = args.notes_folder
+        else:
+            log("osascript not found (not a Mac?): skipping Apple Notes")
 
     whisper = find_whisper()
     model = ensure_model(args.model)
@@ -294,7 +356,7 @@ def main():
 
     threading.Thread(
         target=transcribe_worker,
-        args=(whisper, model, language, out_dir, args.keep_audio),
+        args=(whisper, model, language, out_dir, args.keep_audio, notes_folder),
         daemon=True,
     ).start()
 
@@ -306,7 +368,8 @@ def main():
         sys.exit(f"can't listen on port {PORT} ({e.strerror}). Is the receiver already running?")
     bonjour = advertise()
     with server:
-        log(f"ready: model {args.model}, transcripts go to {out_dir}")
+        where = f"{out_dir} and Notes folder '{notes_folder}'" if notes_folder else str(out_dir)
+        log(f"ready: model {args.model}, transcripts go to {where}")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
