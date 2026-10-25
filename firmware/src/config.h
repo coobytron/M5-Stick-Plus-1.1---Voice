@@ -1,4 +1,4 @@
-// Pins and tunables for the voice pen. Wiring is drawn in docs/PEN.md.
+// Pins and tunables for the pocket voice recorder. Wiring is in docs/DESIGN.md.
 #pragma once
 
 #include <Arduino.h>
@@ -18,6 +18,7 @@ constexpr int kEpdRstPin = 3;    // D2
 constexpr int kEpdBusyPin = 4;   // D3
 constexpr int kButtonPin = 5;    // D4, click button to GND (must be an RTC GPIO to wake from sleep)
 constexpr int kBatteryPin = 6;   // D5, battery + through a 1:2 divider (two 220k resistors)
+constexpr int kLedPin = 43;      // D6, orange status LED through 330R to GND (on while recording)
 
 // --- Audio ------------------------------------------------------------------
 constexpr uint32_t kSampleRate = 16000;  // what Whisper wants; 32 KB/s on the card
@@ -37,3 +38,8 @@ constexpr uint32_t kRetryMinutes = 30;         // wake to retry while recordings
 constexpr int kBatteryEmptyMv = 3400;  // rough LiPo curve; stop recording below this
 constexpr int kBatteryFullMv = 4150;
 constexpr uint32_t kDebounceMs = 60;
+
+// --- Button -----------------------------------------------------------------
+constexpr uint32_t kLongPressMs = 700;   // hold from asleep: open Files instead of recording
+constexpr uint32_t kFilesIdleMs = 20000; // Files closes itself after this long untouched
+constexpr uint32_t kSavedShowMs = 2500;  // how long "Saved" stays before the idle screen

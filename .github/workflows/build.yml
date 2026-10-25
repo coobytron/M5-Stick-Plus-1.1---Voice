@@ -22,8 +22,16 @@ jobs:
       - run: pip install platformio
       - name: Use placeholder secrets
         run: cp src/secrets.example.h src/secrets.h
-      - name: Build the pen and the 2.13" bench variant
-        run: pio run -e pen -e bench213
+      - name: Build the recorder and the 2.13" bench variant
+        run: pio run -e recorder -e bench213
+      - name: Render every screen on the desktop
+        run: |
+          pip install pillow
+          ../tools/screen-preview/build.sh recorder
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: tools/screen-preview/out-recorder/*.png
       - name: Check the Mac receiver parses
         run: python -m py_compile ../mac/receiver.py
 
@@ -38,10 +46,12 @@ jobs:
       - name: Render every part (fails if a fit assert trips)
         run: |
           mkdir -p out
-          for p in body sled cap plunger clip; do
-            openscad --hardwarnings -D "part=\"$p\"" -o out/$p.stl pen.scad
+          for p in back front button; do
+            openscad --hardwarnings -D "part=\"$p\"" -o out/$p.stl recorder.scad
           done
+          openscad --hardwarnings -D 'part="clip"' -D with_clip=true -o out/clip-optional.stl recorder.scad
+          openscad --hardwarnings -D 'part="back"' -D with_clip=true -o out/back-for-clip.stl recorder.scad
       - uses: actions/upload-artifact@v4
         with:
-          name: pen-stl
+          name: recorder-stl
           path: cad/out/*.stl

@@ -3,7 +3,7 @@
 //
 // Adapted for the voice pen from GxEPD2_213_B74 (same SSD1680 controller):
 // only the panel size and driver-output-control lines differ.
-// NOT YET TESTED ON A REAL PANEL: see docs/PEN.md "Validation plan".
+// NOT YET TESTED ON A REAL PANEL: see docs/DESIGN.md "Validation plan".
 // Panel: GDEM0097T61 0.97" 88 x 184 : https://www.good-display.com/product/486.html
 // Controller : SSD1680 : https://www.good-display.com/companyfile/101.html
 //

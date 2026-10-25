@@ -1,16 +1,15 @@
-// Voice pen: a click-to-record dictation pen with an e-ink window.
+// Pocket voice recorder: one button, an e-ink window, transcripts from your Mac.
 //
-// Click the top: the pen wakes and records to its microSD card. Click again:
-// it stops, joins Wi-Fi, and hands every waiting recording to the dictation
-// receiver on your Mac (mac/receiver.py), which transcribes it with Whisper
-// and sends the text back. The start of the transcript stays on the e-ink
-// window while the pen sleeps. With no Wi-Fi or no Mac in reach, recordings
-// wait on the card and the pen retries every kRetryMinutes.
+// Press the button: the recorder wakes and records to its microSD card. Press
+// again: it stops, shows "Saved", joins Wi-Fi and hands every waiting
+// recording to the dictation receiver on your Mac (mac/receiver.py), which
+// transcribes it with Whisper and sends the text back. The first words become
+// the note's title in Files. Hold the button instead of pressing it to open
+// Files. With no Wi-Fi or no Mac in reach, recordings wait on the card and the
+// recorder retries every kRetryMinutes.
 //
-// Uses the same wire protocol as the M5StickC dictation firmware (docs/RECEIVER.md),
-// with two optional header fields:
-//   ts=<unix seconds>  when the recording started (omitted if the clock isn't set)
-//   reply=text         after "OK", the receiver sends "TEXT <transcript>\n"
+// Wire protocol: see docs/RECEIVER.md. This firmware sends ts= (when the clock
+// is set) and reply=text on every upload.
 
 #include <Arduino.h>
 #include <ESPmDNS.h>
@@ -25,9 +24,11 @@
 #include <freertos/stream_buffer.h>
 #include <time.h>
 
+#include <algorithm>
 #include <vector>
 
 #include "config.h"
+#include "notes.h"
 #include "screen.h"
 
 #if __has_include("secrets.h")
@@ -36,12 +37,17 @@
 #error "Copy src/secrets.example.h to src/secrets.h and fill in your Wi-Fi details."
 #endif
 
+#ifndef TIMEZONE
+#define TIMEZONE "UTC0"  // secrets.h from before the clock existed
+#endif
+
 namespace {
 
 constexpr i2s_port_t kI2sPort = I2S_NUM_0;
 constexpr size_t kWavHeaderBytes = 44;
 constexpr const char* kRecDir = "/rec";
-constexpr const char* kLastTextPath = "/last.txt";
+constexpr uint32_t kLevelStepMs = 250;  // one waveform bar per quarter second
+constexpr size_t kLevelBars = 28;
 
 struct WifiNetwork {
   const char* ssid;
@@ -54,15 +60,13 @@ volatile bool capturing = false;
 volatile int16_t lastPeak = 0;
 volatile uint32_t droppedBytes = 0;
 
-// Clicks are latched by an interrupt so none are missed while the e-ink
-// refresh blocks the main loop.
+// Presses while recording are latched by an interrupt so none are missed
+// while the e-ink refresh blocks the main loop.
 volatile uint32_t clicks = 0;
 volatile uint32_t lastEdgeMs = 0;
 
-String lastTranscript;
-
 // ---------------------------------------------------------------------------
-// Button and battery
+// Button, LED and battery
 
 void IRAM_ATTR onButton() {
   uint32_t now = millis();
@@ -76,6 +80,29 @@ void waitForRelease() {
   while (buttonDown()) delay(10);
   delay(kDebounceMs);
 }
+
+enum class Press { None, Short, Long };
+
+// Waits up to timeoutMs for a press and tells a short press from a hold.
+Press waitPress(uint32_t timeoutMs) {
+  uint32_t start = millis();
+  while (!buttonDown()) {
+    if (millis() - start > timeoutMs) return Press::None;
+    delay(10);
+  }
+  uint32_t down = millis();
+  delay(kDebounceMs);
+  while (buttonDown()) {
+    if (millis() - down >= kLongPressMs) {
+      waitForRelease();
+      return Press::Long;
+    }
+    delay(10);
+  }
+  return Press::Short;
+}
+
+void led(bool on) { digitalWrite(kLedPin, on ? HIGH : LOW); }
 
 int batteryMv() { return analogReadMilliVolts(kBatteryPin) * 2; }
 
@@ -178,42 +205,50 @@ std::vector<String> pendingRecordings() {
 }
 
 uint32_t nextSequence() {
+  uint32_t seq = 0;
+  for (const auto& n : notes::load()) seq = max(seq, n.seq);
   auto names = pendingRecordings();
-  return names.empty() ? 1 : names.back().toInt() + 1;
+  if (!names.empty()) seq = max<uint32_t>(seq, names.back().toInt());
+  return seq + 1;
 }
 
-void loadLastTranscript() {
-  File f = SD.open(kLastTextPath);
-  if (f) lastTranscript = f.readString();
-}
+enum class Recorded { Saved, Nothing, OpenFiles };
 
-void saveLastTranscript(const String& text) {
-  lastTranscript = text;
-  File f = SD.open(kLastTextPath, FILE_WRITE);
-  if (f) f.print(text);
-}
+// Records until the button is pressed again. The mic is already capturing
+// (setup starts it at wake), so words spoken during boot are kept. Holding
+// the wake press instead of letting go means "open Files".
+Recorded record(Note& note) {
+  while (buttonDown()) {
+    if (millis() >= kLongPressMs) {  // millis() counts from wake, which was the press
+      capturing = false;
+      return Recorded::OpenFiles;
+    }
+    delay(5);
+  }
+  led(true);
 
-// Records until the button is clicked again. The mic is already capturing
-// (setup starts it at wake), so words spoken during boot are kept.
-// Returns false if nothing usable was saved.
-bool record() {
   SD.mkdir(kRecDir);
+  note.seq = nextSequence();
+  note.ts = clockIsSet() ? time(nullptr) - millis() / 1000 : 0;
   char path[48];
-  snprintf(path, sizeof(path), "%s/%05u_%lu.wav", kRecDir, (unsigned)nextSequence(),
-           clockIsSet() ? (unsigned long)time(nullptr) : 0UL);
+  snprintf(path, sizeof(path), "%s/%05u_%lu.wav", kRecDir, (unsigned)note.seq, (unsigned long)note.ts);
   File f = SD.open(path, FILE_WRITE);
   if (!f) {
     capturing = false;
-    screen::message("Card error", "Couldn't create a file on the microSD card.");
-    return false;
+    led(false);
+    screen::message("Card error", "Check the microSD card.");
+    return Recorded::Nothing;
   }
   writeWavHeader(f, 0);
 
-  waitForRelease();  // the press that woke us is not the stop click
+  delay(kDebounceMs);
   clicks = 0;
   attachInterrupt(kButtonPin, onButton, FALLING);
 
   static uint8_t chunk[4096];
+  std::vector<uint8_t> levels(kLevelBars, 0);
+  int16_t stepPeak = 0;
+  uint32_t nextStepMs = millis() + kLevelStepMs;
   uint32_t dataBytes = 0;
   uint32_t lastDrawnSecond = UINT32_MAX;
   const char* stopReason = nullptr;
@@ -223,10 +258,17 @@ bool record() {
       if (f.write(chunk, n) != n) stopReason = "Card full";
       dataBytes += n;
     }
-    uint32_t seconds = millis() / 1000;  // millis() counts from wake, which was the click
+    stepPeak = max<int16_t>(stepPeak, (int16_t)lastPeak);
+    if (millis() >= nextStepMs) {
+      levels.erase(levels.begin());
+      levels.push_back(min<int>(stepPeak, 20000) / 200);
+      stepPeak = 0;
+      nextStepMs += kLevelStepMs;
+    }
+    uint32_t seconds = millis() / 1000;
     if (seconds != lastDrawnSecond) {
       lastDrawnSecond = seconds;
-      screen::recording(seconds, min<int>(lastPeak, 20000) / 200);
+      screen::recording(seconds, levels, batteryPercent());
     }
     if (clicks > 0) stopReason = "";
     else if (seconds >= kMaxRecordSeconds) stopReason = "Time limit";
@@ -235,6 +277,7 @@ bool record() {
 
   detachInterrupt(kButtonPin);
   capturing = false;
+  led(false);
   // Keep what the buffer still holds.
   while (size_t n = xStreamBufferReceive(audioStream, chunk, sizeof(chunk), 0)) {
     if (f.write(chunk, n) != n) break;
@@ -244,13 +287,15 @@ bool record() {
   f.close();
   if (droppedBytes > 0) Serial.printf("dropped %u bytes: card too slow\n", (unsigned)droppedBytes);
 
-  // Under half a second is a mis-click, not a thought.
+  // Under half a second is a mis-press, not a thought.
   if (dataBytes < kSampleRate) {
     SD.remove(path);
-    return false;
+    return Recorded::Nothing;
   }
+  note.seconds = dataBytes / (kSampleRate * 2);
+  notes::add(note);
   if (*stopReason) screen::message(stopReason, "Recording saved.");
-  return true;
+  return Recorded::Saved;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +316,7 @@ bool findReceiver() {
   if (strlen(DICTATION_HOST) > 0) {
     return receiverIp.fromString(DICTATION_HOST) || WiFi.hostByName(DICTATION_HOST, receiverIp);
   }
-  MDNS.begin("voicepen");
+  MDNS.begin("voicerecorder");
   int found = MDNS.queryService("m5dict", "tcp");
   if (found <= 0) return false;
   receiverIp = MDNS.IP(0);
@@ -285,9 +330,9 @@ bool sendFrame(const uint8_t* data, uint16_t len) {
   return len == 0 || client.write(data, len) == len;
 }
 
-// Sends one recording. On success the receiver has it, and if wantText,
-// transcript holds what came back (empty if it took too long).
-bool upload(const String& name, bool wantText, String& transcript) {
+// Sends one recording and waits for its transcript. On success the Mac has
+// it; transcript is empty if transcription took too long or found no speech.
+bool upload(const String& name, String& transcript) {
   String path = String(kRecDir) + "/" + name;
   File f = SD.open(path);
   if (!f || f.size() <= kWavHeaderBytes) return false;
@@ -296,7 +341,7 @@ bool upload(const String& name, bool wantText, String& transcript) {
   if (!client.connect(receiverIp, receiverPort, 3000)) return false;
   client.printf("M5DICT/1 rate=%u bits=16 ch=1", (unsigned)kSampleRate);
   if (ts > 0) client.printf(" ts=%lu", ts);
-  client.print(wantText ? " reply=text\n" : "\n");
+  client.print(" reply=text\n");
 
   static uint8_t chunk[2048];
   f.seek(kWavHeaderBytes);
@@ -313,43 +358,79 @@ bool upload(const String& name, bool wantText, String& transcript) {
   ok = ok && client.readStringUntil('\n').startsWith("OK");
   if (ok) {
     SD.remove(path);  // the Mac has it now
-    if (wantText) {
-      client.setTimeout(kTranscriptWaitMs / 1000);
-      String line = client.readStringUntil('\n');
-      if (line.startsWith("TEXT")) transcript = line.substring(4);
-      transcript.trim();
-    }
+    client.setTimeout(kTranscriptWaitMs / 1000);
+    String line = client.readStringUntil('\n');
+    if (line.startsWith("TEXT")) transcript = line.substring(4);
+    transcript.trim();
   }
   client.stop();
   return ok;
 }
 
-// Uploads everything waiting. Returns a short reason when something is left.
-const char* syncAll() {
+// Uploads everything waiting. If shown is set, its "Saved" screen carries the
+// progress and ends with its transcript title. Returns a short reason when
+// something is left on the card.
+const char* syncAll(Note* shown) {
   auto names = pendingRecordings();
   if (names.empty()) return nullptr;
+  auto status = [&](const String& s) {
+    if (shown) screen::saved(*shown, s, batteryPercent());
+  };
 
-  screen::message("Sending", String(names.size()) + (names.size() == 1 ? " recording" : " recordings"));
+  status("Joining Wi-Fi...");
   if (!joinWifi()) return "No Wi-Fi";
-  configTime(0, 0, "pool.ntp.org");  // timestamps for the next recordings
+  configTime(0, 0, "pool.ntp.org");  // dates for the next recordings
   if (!findReceiver()) return "Mac not found";
 
   for (size_t i = 0; i < names.size(); i++) {
-    bool newest = i == names.size() - 1;
-    if (newest) screen::message("Transcribing", "on your Mac...");
+    uint32_t seq = names[i].toInt();
+    bool isShown = shown && seq == shown->seq;
+    status(isShown ? String("Transcribing...") : String("Sending ") + (i + 1) + " of " + names.size());
     String transcript;
-    if (!upload(names[i], newest, transcript)) return "Upload failed";
-    if (transcript.length() > 0) saveLastTranscript(transcript);
+    if (!upload(names[i], transcript)) return "Upload failed";
+    notes::markSent(seq, transcript);
+    if (isShown) {
+      shown->sent = true;
+      shown->text = transcript;
+    }
   }
+  status("Synced");
   return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Files: press to move down, hold to open a note (or leave on "Back").
+
+void browseFiles() {
+  auto list = notes::load();
+  int selected = 0;
+  bool inDetail = false;
+  screen::files(list, selected, batteryPercent());
+  for (;;) {
+    Press p = waitPress(kFilesIdleMs);
+    if (p == Press::None) return;
+    if (inDetail) {
+      inDetail = false;
+    } else if (p == Press::Short) {
+      selected = (selected + 1) % (list.size() + 1);
+    } else if (selected == (int)list.size()) {
+      return;  // "Back"
+    } else {
+      inDetail = true;
+      screen::detail(list[selected], batteryPercent());
+      continue;
+    }
+    screen::files(list, selected, batteryPercent());
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Sleep
 
 [[noreturn]] void sleepNow(int waiting) {
-  screen::home(lastTranscript, waiting, batteryPercent());
+  screen::idle(batteryPercent(), waiting);
   screen::sleep();
+  led(false);
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   SD.end();
@@ -371,38 +452,52 @@ void setup() {
   Serial.begin(115200);
   rtc_gpio_deinit((gpio_num_t)kButtonPin);  // back from wake-up duty to a normal input
   pinMode(kButtonPin, INPUT_PULLUP);
+  pinMode(kLedPin, OUTPUT);
+  led(false);
   analogSetPinAttenuation(kBatteryPin, ADC_11db);
+  setenv("TZ", TIMEZONE, 1);  // the clock itself survives deep sleep; the zone doesn't
+  tzset();
 
   // Start listening first: on a button wake, speech may already be coming.
   audioStream = xStreamBufferCreate(kAudioBufferBytes, 1);
   micBegin();
   xTaskCreatePinnedToCore(micTask, "mic", 4096, nullptr, 5, nullptr, 0);
-  bool clickedAwake = cause == ESP_SLEEP_WAKEUP_EXT0;
-  capturing = clickedAwake;
+  bool pressedAwake = cause == ESP_SLEEP_WAKEUP_EXT0;
+  capturing = pressedAwake;
 
   SPI.begin(kSpiSckPin, kSpiMisoPin, kSpiMosiPin);
   screen::begin(cause != ESP_SLEEP_WAKEUP_UNDEFINED);
 
   if (!SD.begin(kSdCsPin, SPI)) {
-    screen::message("No card", "Insert a microSD card, then click.");
     capturing = false;
+    screen::message("No card", "Insert a microSD card.");
     waitForRelease();
     rtc_gpio_pullup_en((gpio_num_t)kButtonPin);
     esp_sleep_enable_ext0_wakeup((gpio_num_t)kButtonPin, 0);
     esp_deep_sleep_start();
   }
-  loadLastTranscript();
 
-  if (clickedAwake) record();
+  Note note;
+  Recorded result = pressedAwake ? record(note) : Recorded::Nothing;
   capturing = false;
 
-  const char* problem = syncAll();
-  int waiting = pendingRecordings().size();
-  if (problem) {
-    screen::message(problem, "Saved on the pen. It will try again later.");
-    delay(1500);  // long enough to read before the home screen replaces it
+  if (result == Recorded::OpenFiles) {
+    browseFiles();
+    sleepNow(pendingRecordings().size());
   }
-  sleepNow(waiting);
+
+  bool fresh = result == Recorded::Saved;
+  if (fresh) {
+    screen::saved(note, "", batteryPercent());
+    delay(800);  // let "Saved" land before Wi-Fi status replaces the footer
+  }
+  const char* problem = syncAll(fresh ? &note : nullptr);
+  if (fresh) {
+    // The idle screen's "N to sync" says it's kept; the footer only has room for the reason.
+    screen::saved(note, problem ? String(problem) : String("Synced"), batteryPercent());
+    delay(kSavedShowMs);
+  }
+  sleepNow(pendingRecordings().size());
 }
 
 void loop() {}
