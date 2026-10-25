@@ -6,7 +6,7 @@ How it works, and why, is in [docs/DESIGN.md](docs/DESIGN.md). Goals and open qu
 
 This repository also holds a second, free firmware: a **dictation recorder** that streams what you say to your Mac, which transcribes it locally with Whisper. It lives in `firmware/` and `mac/`; see [docs/DICTATION.md](docs/DICTATION.md).
 
-The **voice pen**, a click-to-record pen with an e-ink window and a 3D-printed body that uses the same Mac receiver, now has its own repository: [coobytron/voice-pen](https://github.com/coobytron/voice-pen).
+The **pocket voice recorder** (one button, an e-ink window and a 3D-printed case; it started here as the voice pen) uses the same Mac receiver and now has its own repository: [coobytron/voice-pen](https://github.com/coobytron/voice-pen).
 
 ## Use it
 
