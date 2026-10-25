@@ -43,3 +43,4 @@ jobs:
       - run: pio run
       - name: Check the Mac receiver parses
         run: python -m py_compile ../mac/receiver.py
+

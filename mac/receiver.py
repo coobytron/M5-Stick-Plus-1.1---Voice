@@ -25,6 +25,7 @@ import struct
 import subprocess
 import sys
 import threading
+import unicodedata
 import urllib.request
 import wave
 
@@ -32,8 +33,27 @@ PORT = 5730
 HOME = pathlib.Path.home() / ".m5dictation"
 MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{}.bin"
 MIN_SECONDS = 0.5  # ignore accidental double-taps
+REPLY_WAIT_SECONDS = 85  # the voice pen gives up after 90 s
+REPLY_MAX_CHARS = 280    # the pen's e-ink window shows the first few lines
 
-jobs: "queue.Queue[tuple[pathlib.Path, float]]" = queue.Queue()
+
+class Job:
+    """One recording to transcribe. If someone is waiting on the text (the
+    voice pen's reply=text), done is set once text holds the transcript."""
+
+    def __init__(self, path, seconds, wants_reply=False):
+        self.path = path
+        self.seconds = seconds
+        self.text = ""
+        self.done = threading.Event() if wants_reply else None
+
+    def finish(self, text=""):
+        self.text = text
+        if self.done:
+            self.done.set()
+
+
+jobs: "queue.Queue[Job]" = queue.Queue()
 
 
 # ---------------------------------------------------------------------------
@@ -55,14 +75,18 @@ class StickHandler(socketserver.StreamRequestHandler):
         if not header.startswith("M5DICT/1"):
             log(f"ignoring unknown client: {header!r}")
             return
-        fields = dict(part.split("=", 1) for part in header.split()[1:])
+        fields = dict(part.split("=", 1) for part in header.split()[1:] if "=" in part)
         rate = int(fields.get("rate", 16000))
+        wants_reply = fields.get("reply") == "text"
+        # The voice pen records offline and uploads later; ts says when it was said.
+        ts = int(fields.get("ts", 0))
+        when = datetime.datetime.fromtimestamp(ts) if ts > 0 else datetime.datetime.now()
 
-        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        path = self.audio_dir / f"dictation_{stamp}.wav"
+        path = unique_audio_path(self.audio_dir, when)
         log(f"recording from {self.client_address[0]}")
 
         total = 0
+        complete = False
         try:
             with wave.open(str(path), "wb") as wav:
                 wav.setnchannels(1)
@@ -79,14 +103,45 @@ class StickHandler(socketserver.StreamRequestHandler):
             log(f"{e}; transcribing what arrived")
         else:
             self.wfile.write(b"OK\n")
+            complete = True
 
         seconds = total / (rate * 2)
+        job = Job(path, seconds, wants_reply and complete)
         if seconds < MIN_SECONDS:
             path.unlink(missing_ok=True)
             log("recording too short, skipped")
-            return
-        log(f"got {seconds:.0f} s of audio, queued for transcription")
-        jobs.put((path, seconds))
+            job.finish()
+        else:
+            log(f"got {seconds:.0f} s of audio, queued for transcription")
+            jobs.put(job)
+
+        if job.done:
+            job.done.wait(REPLY_WAIT_SECONDS)
+            try:
+                self.wfile.write(f"TEXT {for_small_screen(job.text)}\n".encode("ascii"))
+            except OSError:
+                pass  # the pen stopped waiting; the transcript is saved anyway
+
+
+def unique_audio_path(audio_dir, when):
+    """dictation_<time>.wav, with _2, _3... when several arrive for the same second."""
+    stem = f"dictation_{when:%Y-%m-%d_%H-%M-%S}"
+    path = audio_dir / f"{stem}.wav"
+    n = 2
+    while path.exists():
+        path = audio_dir / f"{stem}_{n}.wav"
+        n += 1
+    return path
+
+
+def for_small_screen(text):
+    """Plain ASCII on one line: the pen's e-ink fonts have no accents or curly quotes."""
+    for fancy, plain in {"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+                         "\u2013": "-", "\u2014": "-", "\u2026": "..."}.items():
+        text = text.replace(fancy, plain)
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    text = " ".join(text.split())
+    return text[:REPLY_MAX_CHARS]
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +200,7 @@ def transcribe(whisper, model, language, wav_path):
 
 def describe(wav_path, seconds):
     """Returns a line like "Sunday 25 October 2026 at 03:29 (1:05)"."""
-    when = datetime.datetime.strptime(wav_path.stem, "dictation_%Y-%m-%d_%H-%M-%S")
+    when = datetime.datetime.strptime(wav_path.stem[:29], "dictation_%Y-%m-%d_%H-%M-%S")
     mins, secs = divmod(round(seconds), 60)
     return when, f"{when:%A %d %B %Y at %H:%M} ({mins}:{secs:02d})"
 
@@ -153,6 +208,10 @@ def describe(wav_path, seconds):
 def save_transcript(out_dir, wav_path, seconds, text):
     when, info = describe(wav_path, seconds)
     path = out_dir / f"{when:%Y-%m-%d %H.%M.%S} dictation.txt"
+    n = 2
+    while path.exists():  # several recordings from the same second
+        path = out_dir / f"{when:%Y-%m-%d %H.%M.%S} dictation {n}.txt"
+        n += 1
     path.write_text(f"Dictation, {info}\n\n{text}\n")
     return path
 
@@ -205,7 +264,9 @@ def notify(title, message):
 
 def transcribe_worker(whisper, model, language, out_dir, keep_audio, notes_folder):
     while True:
-        wav_path, seconds = jobs.get()
+        job = jobs.get()
+        wav_path, seconds = job.path, job.seconds
+        text = ""
         try:
             log(f"transcribing {wav_path.name}...")
             text = transcribe(whisper, model, language, wav_path)
@@ -235,6 +296,7 @@ def transcribe_worker(whisper, model, language, out_dir, keep_audio, notes_folde
             log(f"transcription failed, audio kept at {wav_path}: {e}")
             notify("Dictation failed", str(e)[:120])
         finally:
+            job.finish(text)
             jobs.task_done()
 
 
@@ -290,7 +352,7 @@ def main():
     # Recordings that never got transcribed (receiver quit, whisper failed) are retried.
     for leftover in sorted(StickHandler.audio_dir.glob("dictation_*.wav")):
         with wave.open(str(leftover)) as w:
-            jobs.put((leftover, w.getnframes() / w.getframerate()))
+            jobs.put(Job(leftover, w.getnframes() / w.getframerate()))
 
     threading.Thread(
         target=transcribe_worker,
