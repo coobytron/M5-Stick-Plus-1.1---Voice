@@ -1,0 +1,6 @@
+.pio/
+.vscode/
+firmware/src/secrets.h
+__pycache__/
+*.wav
+.DS_Store
