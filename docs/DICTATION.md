@@ -75,7 +75,7 @@ If a transcription fails or the receiver is closed before it finishes, the audio
 
 Plain TCP on port 5730. The Stick sends `M5DICT/1 rate=16000 bits=16 ch=1\n`, then frames of `[uint16 LE length][PCM bytes]` (16-bit mono, 16 kHz), then a zero-length frame. The receiver answers `OK\n`.
 
-Two optional header fields, used by the [voice pen](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/tree/voice-pen), which records offline and uploads later:
+Two optional header fields, used by the [voice pen](https://github.com/coobytron/voice-pen), which records offline and uploads later:
 
 - `ts=<unix seconds>`: when the recording started. The receiver names the audio and transcript by this time instead of the arrival time.
 - `reply=text`: after `OK\n`, the receiver keeps the connection open until the recording is transcribed (up to 85 s) and sends `TEXT <transcript>\n`, one line of plain ASCII, at most 280 characters, empty if there was no speech or it took too long.

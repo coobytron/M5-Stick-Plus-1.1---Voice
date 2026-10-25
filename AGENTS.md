@@ -12,7 +12,7 @@ Keep plans, specs and decisions as Markdown in this repository so the next sessi
 The repository holds two separate firmwares for the same stick:
 
 - **Translator** (root `platformio.ini`, `src/`, `include/`): records a phrase, transcribes and translates it with cloud APIs. Docs: `docs/DESIGN.md`, `docs/PROJECT-BRIEF.md`.
-- **Dictation recorder** (`firmware/`, `mac/`): streams audio over Wi-Fi to a Mac receiver that transcribes locally with whisper.cpp, free. Plan and setup: `docs/DICTATION.md`; its secrets live in `firmware/src/secrets.h` (git-ignored). Update `docs/DICTATION.md` in the same PR as any change to it. The [voice pen](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/tree/voice-pen) uses the same receiver and keeps a copy of `mac/receiver.py` on that branch; keep the wire protocol compatible with both.
+- **Dictation recorder** (`firmware/`, `mac/`): streams audio over Wi-Fi to a Mac receiver that transcribes locally with whisper.cpp, free. Plan and setup: `docs/DICTATION.md`; its secrets live in `firmware/src/secrets.h` (git-ignored). Update `docs/DICTATION.md` in the same PR as any change to it. The [voice pen](https://github.com/coobytron/voice-pen) uses the same receiver and keeps a copy of `mac/receiver.py`; keep the wire protocol compatible with both.
 
 Translator facts:
 
