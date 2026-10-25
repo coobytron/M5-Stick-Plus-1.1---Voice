@@ -1,0 +1,6 @@
+{
+  "extraKnownMarketplaces": {
+    "agent-cody-banks": {"source": {"source": "github", "repo": "coobytron/Agent-Cody-Banks"}}
+  },
+  "enabledPlugins": {"agent-cody-banks@agent-cody-banks": true}
+}
