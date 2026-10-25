@@ -2,6 +2,7 @@
 .vscode/
 include/secrets.h
 firmware/src/secrets.h
+pen/firmware/src/secrets.h
 __pycache__/
 *.wav
 .DS_Store

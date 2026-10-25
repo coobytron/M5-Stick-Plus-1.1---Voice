@@ -9,10 +9,11 @@ Keep plans, specs and decisions as Markdown in this repository so the next sessi
 
 ## Project facts
 
-The repository holds two separate firmwares for the same stick:
+The repository holds two separate firmwares for the M5StickC Plus, plus a separate pen device:
 
 - **Translator** (root `platformio.ini`, `src/`, `include/`): records a phrase, transcribes and translates it with cloud APIs. Docs: `docs/DESIGN.md`, `docs/PROJECT-BRIEF.md`.
 - **Dictation recorder** (`firmware/`, `mac/`): streams audio over Wi-Fi to a Mac receiver that transcribes locally with whisper.cpp, free. Plan and setup: `docs/DICTATION.md`; its secrets live in `firmware/src/secrets.h` (git-ignored). Update `docs/DICTATION.md` in the same PR as any change to it.
+- **Voice pen** (`pen/firmware/`, `pen/cad/`): XIAO ESP32-S3 Sense + 0.97" e-ink in a 3D-printed pen body. Records to microSD, uploads to the same Mac receiver, shows the transcript on e-ink. Brief, design, wiring and validation: `docs/PEN.md`; secrets in `pen/firmware/src/secrets.h` (git-ignored). The case is `pen/cad/pen.scad`; re-export `pen/cad/stl/` when it changes. Update `docs/PEN.md` in the same PR as any change to it.
 
 Translator facts:
 
