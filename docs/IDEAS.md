@@ -2,9 +2,19 @@
 
 A pitch list for Colson to pick from. Nothing here is built or tested yet. Each idea uses only hardware already owned (M5StickC Plus 1.1, Plus 1.2, the e-ink kit, speakers, Pi Zero v1.3) and free software.
 
+## User-selected concepts — 31 October 2026
+
+Three concepts from the latest M5StickC Plus exploration are explicitly selected for further exploration. **Trail Echo** is the user's standout favourite, with **Palette Probe** and **Proximity Brush** also strongly selected. These are product concept briefs, **not implementation instructions**. See the linked GitHub issues for the full interaction stories, hardware dependencies, visual/physical directions, MVP acceptance criteria and Claude handoff.
+
+1. **[Trail Echo — issue #8](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/8)** — A bike-mounted movement logger that records terrain character and replays it as a graphic score. Built-in IMU first; optional GPS and external battery later. Minimal riding UI, post-ride review.
+2. **[Palette Probe — issue #9](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/9)** — A compact colour sampler with a fixed-distance sensor nose and five persistent palette slots. Requires M5Stack Unit Color (TCS3472). Approximate palette capture, **not calibrated colour measurement**.
+3. **[Proximity Brush — issue #10](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/10)** — A handheld spatial brush. A ToF distance sensor and built-in IMU drive live blobby, ferrofluid-like forms on the Stick display. An external visual canvas is optional, not needed for the first demo.
+
+**For Claude:** Read the project `AGENTS.md`, this index and each linked issue; apply the [Agent Cody Banks](https://github.com/coobytron/Agent-Cody-Banks) rules and Creative Technologist / Art Director / Industrial Designer checklists as capabilities, not as pretend executable workers. Keep each experiment separate from existing voice firmware. Start with the cheapest evidence-producing sensor/interaction test once the user explicitly chooses implementation. Distinguish an original Plus device labeled 1.2 from the distinct **M5StickC Plus2** product; do not assume PSRAM or Plus2 pin mapping. None of these three has been built or hardware-verified.
+
 ## What the stick has to work with
 
-| Part | Plus 1.1 | Plus 1.2 (Plus2) |
+| Part | Original Plus 1.1 | Different model: Plus2 (not a Plus 1.2 revision) |
 | --- | --- | --- |
 | IMU (accelerometer + gyro) | yes | yes |
 | IR LED (transmit only, no receiver) | yes, G9 | yes, shared with the LED on G19 |
@@ -15,6 +25,8 @@ A pitch list for Colson to pick from. Nothing here is built or tested yet. Each 
 | RTC, battery | yes | yes |
 | PSRAM | no | 2 MB |
 | Free pins | Grove (G32/G33), hat header | Grove, hat header |
+
+**Revision caveat:** The hardware table's third column describes the separate **M5StickC Plus2**, not an original M5StickC Plus PCB marked v1.2. Do not treat their CPU, PSRAM, pins, IR wiring, or power circuitry as interchangeable. Verify any revision-specific differences against the actual board and its schematic.
 
 Pin numbers are from the vendor docs and should be checked on the board before wiring anything.
 
