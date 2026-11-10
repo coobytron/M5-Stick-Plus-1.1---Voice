@@ -44,7 +44,7 @@ Wi-Fi Radar and Invisible Weather scan without requiring your SSID or password. 
 
 1. With the M5Stick plugged into USB-C, identify its port under Arduino IDE **Tools → Port** (example `/dev/cu.SLAB_USBtoUART`).
 2. Quit Arduino Serial Monitor (it competes for the same serial port).
-3. Open Terminal in the extracted `experiments/signal-os` folder and run:
+3. Open Terminal in the extracted `SIGNAL_OS_v3_1_fixed` folder and run:
 
     ```sh
     python3 -m venv .venv
@@ -54,7 +54,7 @@ Wi-Fi Radar and Invisible Weather scan without requiring your SSID or password. 
 
     Substitute the **actual port from your Mac**.
 4. On the M5Stick open **VOICE REC**. When `HOST READY` appears, press **B** to record; press **B** to stop.
-5. Saved files appear under `experiments/signal-os/recordings/signal_YYYYMMDD_HHMMSS.wav`.
+5. Saved files appear under `SIGNAL_OS_v3_1_fixed/recordings/signal_YYYYMMDD_HHMMSS.wav`.
 
 No audio is uploaded to a cloud service. The Python receiver only writes audio to your Mac.
 
@@ -91,3 +91,7 @@ This variant adds **TRAIL ECHO** as home item 6; the existing radio and audio mo
 - No GPS: Trail Echo records **time and relative vibration**, not locations, grades, speed or actual terrain difficulty.
 
 See [TRAIL_ECHO.md](TRAIL_ECHO.md) for architecture, limits and checks.
+
+## MTB companion: Trail Link (planned; protocol scaffold only)
+
+In addition to Trail Echo's ride-vibration recorder, the project now tracks **Trail Link**, a proposed small radio check-in between two nRF24-compatible devices. Its 16-byte packet encoder/decoder and peer freshness tracker are host-tested in `SIGNAL_OS/TrailLinkCore.h` and `tests/test_link_core.cpp`. **No radio driver, new menu screen, or transmitted messages are included.** It requires external radio hardware and a second compatible peer for validation. See [TRAIL_LINK.md](TRAIL_LINK.md) and [issue #12](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/12). This is **not** an emergency device or a LoRa/Meshtastic radio.

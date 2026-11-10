@@ -1,0 +1,25 @@
+name: SIGNAL OS host tests
+on:
+  pull_request:
+    paths:
+      - 'experiments/signal-os/**'
+      - '.github/workflows/signal-os-host.yml'
+  push:
+    paths:
+      - 'experiments/signal-os/**'
+      - '.github/workflows/signal-os-host.yml'
+jobs:
+  host-protocol-and-trail-echo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run portable C++11 tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd experiments/signal-os
+          test_dir="$(mktemp -d)"
+          for target in test_core test_mode test_link_core; do
+            g++ -std=c++11 -Wall -Wextra -Werror -pedantic -Itests/fakes "tests/${target}.cpp" -o "${test_dir}/${target}"
+            "${test_dir}/${target}"
+          done

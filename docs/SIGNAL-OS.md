@@ -29,3 +29,7 @@ g++ -std=c++11 -Wall -Wextra -pedantic -Itests/fakes tests/test_mode.cpp -o /tmp
 ## Next steps for Claude
 
 Follow [Agent Cody Banks](https://github.com/coobytron/Agent-Cody-Banks) and the repository `AGENTS.md` rules. First compile with the user's Arduino ESP32 / M5Unified / NimBLE 2.5.1 configuration, fix any compatibility issues, and use hardware-validation results before changing design. Preserve the original five modes. For a future v4 merge, require the actual v4 Channel Atlas source and reconcile navigation and data storage carefully. Do not claim a feature is hardware-verified without a recorded test.
+
+## Trail Link (radio companion, not yet enabled)
+
+The MTB partner-check-in concept is tracked in [issue #12](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/12). A 16-byte portable C++11 codec and freshness tracker exist at [TrailLinkCore.h](../experiments/signal-os/SIGNAL_OS/TrailLinkCore.h), with [host tests](../experiments/signal-os/tests/test_link_core.cpp) and a [radio / safety / interaction brief](../experiments/signal-os/TRAIL_LINK.md). **No radio driver, new menu mode, automatic radio transmit, or physical validation is included.** This extension requires the external Stick RF 424 switched to nRF24 at 2.4 GHz and a second matching peer. The existing Trail Echo IMU ride recorder works independently of it. See the separate [host-test workflow](../.github/workflows/signal-os-host.yml). Neither feature is a rescue or emergency system.
