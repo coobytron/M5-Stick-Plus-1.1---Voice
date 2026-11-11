@@ -72,3 +72,16 @@ The current `test_link_core.cpp` covers byte order, round-trip, CRC corruption, 
 - This note + [issue #12](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/12) are the protocol/interaction brief.
 - Source code is an isolated, *unconnected* library; **not a new menu instrument yet**.
 - Claude: follow `AGENTS.md`, preserve the voice firmware and five original SIGNAL OS instruments, and do not reinterpret the Art Director / Creative Technologist / Industrial Designer checklists as executable agents. The first unsolved task is **actual radio-pin / two-device proof**, not a polished screen.
+
+## Hardware ownership update — 11 Nov 2026
+
+The user confirms they **got the PINGEQUA M5StickC Plus 2-in-1 RF module** and provided the [official support/setup page](https://www.pingequa.com/pages/support-m5stack-stickc-plus-2-in-1-module). This is **ownership/purchase confirmation only**, not evidence the module has been plugged in, detected, or tested.
+
+- Hardware: **PINGEQUA Stick RF 424**, CC1101 (433 MHz) / **nRF24L01+ (2.4 GHz)**, slide switch. For Trail Link choose **2.4 GHz**.
+- Vendor setup: [M5StickC Plus support](https://www.pingequa.com/pages/support-m5stack-stickc-plus-2-in-1-module), [Setup Guide](https://github.com/pingequalab/stick-rf-424/blob/main/wiki/Setup-Guide.md), [Vendor firmware guide](https://github.com/pingequalab/stick-rf-424/blob/main/wiki/Firmware-Guide.md).
+- Vendor instructions are **for Bruce**, not SIGNAL OS. **Do not flash Bruce over SIGNAL OS** for the initial integration. A separate backup/test-flash is an optional diagnostic only if explicitly selected.
+- Power down before connecting. Vendor's standalone Setup Guide says to attach to the **M5StickC Plus GPIO header**, switch to 2.4 GHz, and choose NRF24 Legacy **in Bruce**. Some vendor README text instead references a Cardputer SD slot; do not attempt that on M5StickC Plus. Confirm actual orientation and pin labels physically.
+- The vendor does not provide an authoritative, complete original Plus 1.x **SPI SCK/MISO/MOSI/CSN/CE pin map** in these setup instructions. Do not invent GPIO assignments or reuse Plus2-specific configurations without verification.
+- Original Plus PCB revision labeled 1.2 may not be identical to the distinct **Plus2** product. Treat that distinction as an unresolved electrical and firmware compatibility check.
+
+**Next safe milestones:** (1) inspect board/module and markings; (2) document exact connector orientation and GPIO/SPI map; (3) write an isolated nRF24 presence test that doesn't overwrite/restructure SIGNAL OS; (4) only after detection, connect the protocol in `TrailLinkCore.h` to RF24 calls; (5) require a second compatible radio endpoint for true send/receive validation. Until then, Trail Link remains a tested codec, not a working radio feature. No message is safety-critical.
