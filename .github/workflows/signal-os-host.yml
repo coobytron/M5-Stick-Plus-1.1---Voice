@@ -19,7 +19,7 @@ jobs:
           set -euo pipefail
           cd experiments/signal-os
           test_dir="$(mktemp -d)"
-          for target in test_core test_mode test_link_core test_bridge_wire; do
+          for target in test_core test_mode test_link_core test_bridge_wire test_rf_model; do
             g++ -std=c++11 -Wall -Wextra -Werror -pedantic -Itests/fakes "tests/${target}.cpp" -o "${test_dir}/${target}"
             "${test_dir}/${target}"
           done
