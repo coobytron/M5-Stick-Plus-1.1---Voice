@@ -41,3 +41,7 @@ Each phrase is one Whisper call (billed per minute of audio) and one short Claud
 ## Status
 
 The firmware compiles in CI. It has not been run on a real stick yet; see the validation checklist in [docs/DESIGN.md](docs/DESIGN.md).
+
+## SIGNAL OS (separate instrument firmware)
+
+The [`experiments/signal-os/`](experiments/signal-os/) folder contains **SIGNAL OS v3.1 + Trail Echo**: BLE Radar, Wi-Fi Radar, Invisible Weather, Audio Scope, USB Voice Notes, and the IMU-based Trail Echo terrain visualization. See [Signal OS status and validation](docs/SIGNAL-OS.md). This is an independent experimental sketch; existing translator and dictation firmware remain unchanged. Host tests pass; full Arduino/device validation remains outstanding. This source is based on the supplied v3.1 sketch and does not include v4 Channel Atlas.
