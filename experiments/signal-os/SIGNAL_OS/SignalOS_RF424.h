@@ -8,6 +8,11 @@
 #if SIGNAL_OS_RF424_CC1101
 #include <SPI.h>
 #include <RadioLib.h>
+// RadioLib 8.0 changed FSK frequency arguments from MHz floats to Hz integers.
+// v7.8.1 is the supported, pinned driver for this opt-in experiment.
+#if RADIOLIB_VERSION_MAJOR >= 8
+#error "SIGNAL OS RF424: install RadioLib 7.8.1 in Arduino Library Manager (8.x API is incompatible)"
+#endif
 #endif
 
 namespace signalrf {

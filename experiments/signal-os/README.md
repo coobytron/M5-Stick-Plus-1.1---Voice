@@ -111,3 +111,5 @@ SIGNAL OS includes **two new home instruments**: RF Atlas and Channel Atlas. RF 
 **Related:** [Trail Link #12](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/12), [Trail Echo #8](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/8), [vendor RF 424](https://www.pingequa.com/pages/support-m5stack-stickc-plus-2-in-1-module), [Bruce CC1101 pin mapping](https://github.com/BruceDevices/firmware/wiki/CC1101), [RadioLib CC1101 class](https://jgromes.github.io/RadioLib/class_c_c1101.html).
 
 Portable host regression: `g++ -std=c++11 -Wall -Wextra -Werror -pedantic tests/test_rf_model.cpp -o /tmp/signal_rf_model && /tmp/signal_rf_model`. Run previous Trail Echo, Trail Link and GPS packet host tests unchanged. **The exact physical RF module and Arduino toolchain must still be tested.**
+
+**RadioLib compatibility:** install exactly **RadioLib 7.8.1** for the opt-in CC1101 receiver. RadioLib **8.0.0** (released November 7, 2026) changed `CC1101::begin` and frequency API types; the header intentionally rejects 8.x until its adapter is ported. With the RF flag left at `0`, RadioLib is not required.
