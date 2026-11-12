@@ -99,3 +99,17 @@ In addition to Trail Echo's ride-vibration recorder, the project now tracks **Tr
 ## Cardputer ADV GPS Bridge (experimental)
 
 The optional GPS companion is in [`cardputer-adv/`](cardputer-adv/). Existing SIGNAL OS modes run unchanged unless `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is changed to `1` in `SIGNAL_OS.ino`. The Cardputer sketch logs GNSS to local microSD and receives ESP-NOW motion packets; visualizations export to GeoJSON and SVG. No SX1262 LoRa transmission or RF424 module is used for this bridge. **Arduino/device testing is pending**. See [Cardputer setup](cardputer-adv/README.md) and issue #13.
+
+## ESP32 IRAM linker overflow: core-version diagnosis
+
+**Observed on 2026-11-11:** Arduino IDE linked this complete SIGNAL OS sketch with the Espressif `esp-x32/2601` toolchain but failed with `.iram0.text will not fit in region iram0_0_seg`, **2,936 bytes** over the IRAM limit. This is *instruction RAM*, not the flash partition, file storage, or heap. Changing “Partition Scheme” or “Flash Size” is not a fix.
+
+**First reproducible workaround:** in Arduino IDE → **Boards Manager**, choose **`esp32` by Espressif Systems, version `3.0.7`**, then select **Tools → Board → esp32 → M5StickCPlus** (original Plus 1.x, **not M5StickCPlus2**) and click **Verify**. Keep `M5Unified`, `M5GFX`, and `NimBLE-Arduino 2.5.1` installed. If the sketch compiles under 3.0.7, this indicates a toolchain/library IRAM budget difference; it does not by itself establish hardware correctness.
+
+**Why this test:** ESP32 core 3.1.x+ has a documented case of an IRAM overrun in a sketch that links under core 3.0.7 with the same libraries. As the Arduino core bundles precompiled ESP-IDF binaries, adding `-DCONFIG_ESP_WIFI_IRAM_OPT=0` in a sketch cannot rebuild those binary libraries; avoid unverified “RAM size” macros or edits to linker memory maps.
+
+**Automated comparison:** [signal-os-arduino.yml](../../.github/workflows/signal-os-arduino.yml) separately compiles this sketch against core 3.0.7 and 3.3.12 and attempts to preserve the build's linker `.map` files to pinpoint IRAM growth. Neither that job's existence nor a pass in one version demonstrates that the other version will fit.
+
+**If 3.0.7 still fails:** share the **full verbose compile log**, board name, installed ESP32 core version and `M5Unified` / `M5GFX` / NimBLE-Arduino versions. In Arduino IDE, File → Preferences → “Show verbose output during compilation”; compile again. We can then inspect the map and identify the IRAM-consuming functions without deleting the BLE, Wi-Fi, audio, Trail Echo or Cardputer bridge features.
+
+**Sources:** [Espressif IRAM troubleshooting](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/performance/ram-usage.html); [Arduino-ESP32 discussion #11062](https://github.com/espressif/arduino-esp32/discussions/11062).
