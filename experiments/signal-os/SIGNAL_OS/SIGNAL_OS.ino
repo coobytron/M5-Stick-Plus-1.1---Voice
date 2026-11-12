@@ -19,6 +19,12 @@
 #include <M5Unified.h>
 #include <M5GFX.h>
 #include "SignalOS_TrailEcho.h"
+// Optional 433-MHz CC1101 RX (RF424 switch must be on 433 MHz).
+// Default OFF: preserves the user's confirmed 1.x build and avoids RadioLib.
+#ifndef SIGNAL_OS_RF424_CC1101
+#define SIGNAL_OS_RF424_CC1101 0
+#endif
+#include "SignalOS_RF424.h"
 // Set to 1 only after Cardputer ESP-NOW RX validation; otherwise no behavior change.
 #define SIGNAL_OS_TRAIL_BRIDGE_ENABLE 0
 #include "TrailBridgeRadio.h"
@@ -36,13 +42,13 @@ constexpr int BLE_ROWS=7, WIFI_ROWS=8;
 constexpr uint32_t BLE_KEEP_MS=17000;
 constexpr uint32_t FRAME_MS=70;
 constexpr uint32_t AUDIO_RATE=16000;
-constexpr uint8_t HOME_ITEMS=6;
-constexpr uint8_t STANDARD_BRIGHTNESS=88, TRAIL_REC_BRIGHTNESS=16;
+constexpr uint8_t HOME_ITEMS=8;
+constexpr uint8_t STANDARD_BRIGHTNESS=88, TRAIL_REC_BRIGHTNESS=112;
 constexpr int AUDIO_BLOCK=512;
 constexpr float PI2=6.28318530718f;
 
 enum View : uint8_t { HOME, BLE_RADAR, BLE_LIST, BLE_INSPECT, BLE_HISTORY,
- BLE_ALERT, WIFI_RADAR, WIFI_LIST, WEATHER, SCOPE, RECORDER, TRAIL_ECHO };
+ BLE_ALERT, WIFI_RADAR, WIFI_LIST, WEATHER, CHANNEL_ATLAS, RF_ATLAS, RF_WATCH, SCOPE, RECORDER, TRAIL_ECHO };
 static View view=HOME;
 static uint8_t homeSelection=0, bleSelection=0, wifiPage=0;
 static bool namedOnly=false, showHidden=true, alarmEnabled=false, weatherDense=false;
@@ -71,6 +77,12 @@ static M5Canvas canvas(&M5.Display);
 static trailecho::Mode trailEcho;
 static trailbridge::Sender trailGpsLink;
 static bool trailImuReady=false;
+static signalrf::Sampler rfSampler;
+static signalrf::QuietWatch rfQuietWatch;
+static uint8_t rfWatchBand=4;
+static bool atlasContrast=false;
+static uint16_t trailLiveHistory[119]={};
+static uint8_t trailLiveHead=0;
 
 // Audio is transmitted as binary packets (SREC, D, E) at 921600 baud.
 // Two pending mic buffers, callback->queue, main loop->serial, requeue.
@@ -113,6 +125,8 @@ const char* viewName(View v) {
     case BLE_INSPECT:return "BLE / INSPECT"; case BLE_HISTORY:return "BLE / HISTORY";
     case BLE_ALERT:return "BLE / ALERT"; case WIFI_RADAR:return "WIFI / RADAR";
     case WIFI_LIST:return "WIFI / NETWORKS"; case WEATHER:return "INVISIBLE WEATHER";
+    case CHANNEL_ATLAS:return "CHANNEL / ATLAS"; case RF_ATLAS:return "RF / ATLAS";
+    case RF_WATCH:return "RF / QUIET WATCH";
     case SCOPE:return "AUDIO / SCOPE"; case RECORDER:return "AUDIO / RECORD";
     case TRAIL_ECHO:return "TRAIL / ECHO";
     default:return "INSTRUMENTS";
@@ -148,7 +162,11 @@ class ScanCB : public NimBLEScanCallbacks {
 } scanCB;
 
 bool isBle(View v) { return v>=BLE_RADAR && v<=BLE_ALERT; }
-bool isWifi(View v) { return v>=WIFI_RADAR && v<=WEATHER; }
+bool isWifi(View v) { return v>=WIFI_RADAR && v<=CHANNEL_ATLAS; }
+bool usesRf(View v) {
+  return v==RF_ATLAS || v==RF_WATCH || v==WEATHER ||
+         v==CHANNEL_ATLAS || v==TRAIL_ECHO;
+}
 bool isAudio(View v) { return v==SCOPE || v==RECORDER; }
 void startBle() {
   if(!bleInit) {
@@ -316,6 +334,7 @@ void enter(View next) {
   if(isWifi(next)&&!isWifi(prev))startWifi();
   if(next==SCOPE)audioMicOn();
   if(next==TRAIL_ECHO) {trailEcho.enter();trailGpsLink.begin();}
+  if(usesRf(next))rfSampler.ensure(millis());
   lastFrame=0;
 }
 
@@ -354,16 +373,17 @@ void rings(int cx,int cy,int r) {
   canvas.fillCircle(cx,cy,3,UI_WHITE);
 }
 void drawHome() {
-  header("V3.1 / TE");
-  const char* names[]={"BLUETOOTH","WI-FI RADAR","INVISIBLE WX","SOUND SCOPE","VOICE REC","TRAIL ECHO"};
-  const char* subtitles[]={"BLE FIELD","2.4GHz NETWORKS","WIRELESS PATTERNS","MICROPHONE","USB TO MAC","TERRAIN / MOTION"};
+  header("V3.1 / RF LAB");
+  const char* names[]={"BLUETOOTH","WI-FI RADAR","CHANNEL ATLAS","INVISIBLE WX",
+                       "RF ATLAS","SOUND SCOPE","VOICE REC","TRAIL ECHO"};
+  const char* subtitles[]={"BLE FIELD","2.4 GHz NETWORKS","CHANNEL ACTIVITY","WIRELESS PATTERNS",
+                           "433 MHz SURVEY","MICROPHONE","USB TO MAC","TERRAIN / MOTION"};
   for(int i=0;i<HOME_ITEMS;++i) {
-    int y=55+i*25;
-    if(i==homeSelection) {canvas.fillRoundRect(6,y-2,123,24,3,PANEL);canvas.fillRect(6,y-2,2,24,LIME);}
+    int y=46+i*21;
+    if(i==homeSelection) {canvas.fillRoundRect(6,y-1,123,21,3,PANEL);canvas.fillRect(6,y-1,2,21,LIME);}
     txt(13,y,String(i+1)+" "+names[i],i==homeSelection?LIME:UI_WHITE);
-    txt(25,y+11,subtitles[i],MUTED);
+    txt(25,y+10,subtitles[i],MUTED);
   }
-  txt(8,208,"HOLD A FROM ANY VIEW",MUTED);
   footer("A OPEN","B NEXT");
 }
 void drawBleRadar() {
@@ -467,13 +487,15 @@ void drawWifiList() {
 void drawWeather() {
   header(String(wifiCount)+" AP");
   txt(8,59,"RADIO FIELD",UI_WHITE,2);
-  txt(8,80,"2.4 GHz / AMBIENT",MUTED);
+  txt(8,80,rfSampler.ready()?"WIFI + 433 MHz":"2.4 GHz / AMBIENT",MUTED);
   uint32_t t=millis();
   // Not traffic monitoring: animated signal-field metaphor from observed AP RSSI.
   for(int j=0;j<16;++j){
     int x=7+j*8;
     int ch=1+j%11;
     float strength=constrain(channelStrength[ch]/70.0f,0.0f,4.0f);
+    if(rfSampler.ready() && (j%4==0))
+      strength+=signalrf::strength(rfSampler.at(uint8_t(j%signalrf::kBands)))/70.0f;
     for(int y=102;y<188;y+=5) {
       float wiggle=sinf((float)y*.06f + j*.53f + t*.0011f*(weatherDense?2.4f:1.0f));
       int xx=x+(int)(wiggle*(2.5f+strength));
@@ -484,8 +506,73 @@ void drawWeather() {
   }
   canvas.drawFastHLine(8,194,119,RULE);
   txt(8,203,weatherDense?"FIELD / ENERGIZED":"FIELD / CALM",MUTED);
+  if(rfSampler.ready())rightTxt(127,203,String(rfSampler.peak())+" dBm",UI_ORANGE);
   footer("A HOME (HOLD)","B STYLE");
 }
+
+// CHANNEL ATLAS keeps the existing Wi-Fi AP strengths (not packet occupancy).
+// A second, CC1101-only row shows received 433 MHz energy if RF is enabled.
+void drawChannelAtlas() {
+  header(String(wifiCount)+" AP");
+  txt(8,60,"2.4 GHz / CH",UI_WHITE);
+  const int graphX=9,graphY=164;
+  for(int ch=1;ch<=13;ch++) {
+    const int h=constrain(channelStrength[ch]/14,1,66);
+    const int x=graphX+(ch-1)*9;
+    canvas.fillRect(x,graphY-h,5,h,atlasContrast?UI_WHITE:LIME);
+  }
+  txt(8,176,"1     4     7    10  13",MUTED);
+  canvas.drawFastHLine(8,193,119,RULE);
+  txt(8,199,"433 MHz RF",MUTED);
+  rightTxt(127,199,rfSampler.ready()?String(rfSampler.peak())+" dBm":"OFF / NO CHIP",
+           rfSampler.ready()?UI_ORANGE:MUTED);
+  footer("A WIFI","B STYLE");
+}
+void drawRfAtlas() {
+  header(rfSampler.ready()?"CC1101 RX":"MODULE OFF");
+  txt(8,61,"RF / ACTIVITY",UI_WHITE,2);
+  txt(8,82,"433.2 - 434.8 MHz",MUTED);
+  if(!rfSampler.ready()) {
+    txt(8,112,"RF424 NOT ACTIVE",UI_ORANGE);
+    txt(8,131,"ENABLE CC1101 FLAG",MUTED);
+    txt(8,144,"SWITCH TO 433 MHz",MUTED);
+    txt(8,174,"WIFI / BLE STILL WORK",MUTED);
+  } else {
+    for(int i=0;i<signalrf::kBands;i++) {
+      const int16_t val=rfSampler.at(uint8_t(i));
+      const int x=10+i*13;
+      const int h=val==signalrf::kMissing?1:1+signalrf::strength(val)*81/100;
+      canvas.fillRect(x,184-h,8,h,i==rfWatchBand?UI_ORANGE:LIME);
+    }
+    txt(8,190,"433.2",MUTED);rightTxt(127,190,"434.8",MUTED);
+    txt(8,205,"PEAK",MUTED);
+    rightTxt(127,205,String(rfSampler.peak())+" dBm",UI_WHITE);
+  }
+  footer("A WATCH","B BAND");
+}
+void drawRfWatch() {
+  header(rfSampler.ready()?"CC1101 RX":"MODULE OFF");
+  txt(8,60,"RF / QUIET WATCH",UI_WHITE);
+  txt(8,82,String(signalrf::centerKHz(rfWatchBand)/1000.0f,2)+" MHz",UI_WHITE,2);
+  txt(8,113,rfQuietWatch.armed()?"WATCH ARMED":"NOT ARMED",
+      rfQuietWatch.armed()?LIME:MUTED);
+  if(!rfSampler.ready())
+    txt(8,139,"NO RADIO DATA",UI_ORANGE);
+  else if(!rfQuietWatch.armed())
+    txt(8,139,"B TO ARM",MUTED);
+  else if(!rfQuietWatch.seen())
+    txt(8,139,"WAITING FOR ENERGY",AMBER);
+  else if(rfQuietWatch.quiet(millis()))
+    txt(8,139,"QUIET FOR 12s+",UI_ORANGE);
+  else {
+    txt(8,139,"RF ACTIVITY SEEN",LIME);
+    rightTxt(127,159,String(rfQuietWatch.age(millis())/1000u)+" s ago",MUTED);
+  }
+  txt(8,187,"NOT DEVICE TRACKING",MUTED);
+  txt(8,201,"NO SOURCE ID / RANGE",MUTED);
+  footer("A ATLAS","B ARM/OFF");
+}
+
 void drawScope() {
   header(micReady?"MIC ON":"MIC OFF");
   txt(8,60,"SOUND FIELD",UI_WHITE,2);
@@ -535,16 +622,33 @@ void drawTrailEcho() {
     return;
   }
   if(trailEcho.recording()) {
-    txt(8,63,"TERRAIN MEMORY",MUTED);
-    canvas.drawCircle(67,128,39,RING);
-    canvas.drawCircle(67,128,30,RULE);
-    canvas.fillCircle(67,128,6,UI_ORANGE);
-    txt(37,102,"CAPTURING",LIME);
-    int seconds=data.count();
-    txt(32,143,String(seconds/60)+":"+(seconds%60<10?"0":"")+String(seconds%60),UI_WHITE,2);
-    txt(8,191,"50 HZ / IMU",MUTED);
-    rightTxt(127,191,String(data.liveMg())+" mg",UI_WHITE);
-    txt(8,205,"DISPLAY DIMMED",MUTED);
+    const uint32_t now=millis();
+    const uint16_t movement=data.liveMg();
+    // Visibility when stationary + direct visual response to accelerometer.
+    const uint8_t phase=uint8_t((now/80u)%24u);
+    const uint8_t pulse=phase<=12u?phase:uint8_t(24u-phase);
+    const int energy=min(9,int(movement/200u));
+    const uint16_t color=movement>=700u?UI_ORANGE:LIME;
+    trailLiveHistory[trailLiveHead]=movement;
+    trailLiveHead=uint8_t((trailLiveHead+1u)%119u);
+    txt(8,62,rfSampler.ready()?"IMU + RF LIVE":"LIVE / TERRAIN",UI_WHITE);
+    canvas.fillCircle(121,66,((now/450u)&1u)?3:5,UI_RED);
+    canvas.drawCircle(67,111,38,RING);
+    canvas.drawCircle(67,111,24+int(pulse/2u)+energy/2,color);
+    canvas.drawCircle(67,111,17,dim(LIME,95));
+    canvas.fillCircle(67,111,5+energy/2,color);
+    const uint32_t seconds=data.count();
+    txt(33,148,String(seconds/60u)+":"+(seconds%60u<10u?"0":"")+String(seconds%60u),UI_WHITE,2);
+    txt(8,173,"MOTION",MUTED);
+    rightTxt(127,173,String(movement)+" mg",color);
+    // Display history is visual only; stored 50Hz data and bin format unchanged.
+    canvas.drawFastHLine(8,208,119,RING);
+    for(int x=0;x<119;++x) {
+      const uint16_t v=trailLiveHistory[(trailLiveHead+uint8_t(x))%119u];
+      const int h=min(25,1+int(v/64u));
+      canvas.drawFastVLine(8+x,208-h,h,v>=700u?UI_ORANGE:LIME);
+    }
+    if(rfSampler.ready())txt(8,189,String(rfSampler.lastRssi())+" dBm @433",UI_ORANGE);
     footer("A STOP","HOLD A HOME");
   } else if(!data.count()) {
     txt(8,65,"TERRAIN MEMORY",UI_WHITE,2);
@@ -614,6 +718,9 @@ void draw() {
     case WIFI_RADAR:drawWifiRadar();break;
     case WIFI_LIST:drawWifiList();break;
     case WEATHER:drawWeather();break;
+    case CHANNEL_ATLAS:drawChannelAtlas();break;
+    case RF_ATLAS:drawRfAtlas();break;
+    case RF_WATCH:drawRfWatch();break;
     case SCOPE:drawScope();break;
     case RECORDER:drawRecorder();break;
     case TRAIL_ECHO:drawTrailEcho();break;
@@ -623,18 +730,25 @@ void draw() {
 
 void onA() {
   if(view==HOME) {
-    static const View choices[]={BLE_RADAR,WIFI_RADAR,WEATHER,SCOPE,RECORDER,TRAIL_ECHO};
+    static const View choices[]={BLE_RADAR,WIFI_RADAR,CHANNEL_ATLAS,WEATHER,RF_ATLAS,SCOPE,RECORDER,TRAIL_ECHO};
     enter(choices[homeSelection]);
   } else if(isBle(view)) {
     enter(view==BLE_ALERT?BLE_RADAR:(View)((int)view+1));
   } else if(view==WIFI_RADAR)enter(WIFI_LIST);
   else if(view==WIFI_LIST)enter(WIFI_RADAR);
+  else if(view==CHANNEL_ATLAS)enter(WIFI_RADAR);
+  else if(view==RF_ATLAS)enter(RF_WATCH);
+  else if(view==RF_WATCH)enter(RF_ATLAS);
   else if(view==SCOPE)enter(RECORDER);
   else if(view==RECORDER)enter(SCOPE);
   else if(view==TRAIL_ECHO && trailImuReady) {
     const bool wasRecording=trailEcho.recording();
     trailEcho.shortA(millis());
-    if(!wasRecording && trailEcho.recording())trailGpsLink.startRide(millis());
+    if(!wasRecording && trailEcho.recording()) {
+      memset(trailLiveHistory,0,sizeof(trailLiveHistory));
+      trailLiveHead=0;
+      trailGpsLink.startRide(millis());
+    }
     M5.Display.setBrightness(trailEcho.recording()?TRAIL_REC_BRIGHTNESS:STANDARD_BRIGHTNESS);
   }
 }
@@ -651,6 +765,9 @@ void onB() {
     else alarmEnabled=false;
   } else if(view==WIFI_RADAR){showHidden=!showHidden;}
   else if(view==WIFI_LIST)wifiPage++;
+  else if(view==CHANNEL_ATLAS)atlasContrast=!atlasContrast;
+  else if(view==RF_ATLAS) {rfWatchBand=uint8_t((rfWatchBand+1u)%signalrf::kBands);rfQuietWatch.arm(false,millis());}
+  else if(view==RF_WATCH)rfQuietWatch.arm(!rfQuietWatch.armed(),millis());
   else if(view==WEATHER)weatherDense=!weatherDense;
   else if(view==SCOPE)soundLevel=0;
   else if(view==RECORDER){if(recording)streamStop();else streamBegin();}
@@ -729,6 +846,11 @@ void loop() {
   if(M5.BtnB.wasClicked())onB();
   uint32_t now=millis();
   if(isWifi(view) && now-lastWifiPoll>150){lastWifiPoll=now;pollWifi();}
+  if(usesRf(view)) {
+    rfSampler.ensure(now);
+    if(rfSampler.poll(now) && rfSampler.reportedBand()==rfWatchBand)
+      rfQuietWatch.feed(rfSampler.lastRssi(),now);
+  }
   if(isBle(view)) {refreshBle();tickHistory();checkAlarm();}
   if(view==SCOPE && now-lastFrame>=FRAME_MS)pollAudioScope();
   if(now-lastFrame>=FRAME_MS) {lastFrame=now;draw();}

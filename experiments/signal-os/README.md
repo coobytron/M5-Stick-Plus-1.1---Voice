@@ -26,6 +26,10 @@ Designed for the original **M5StickC Plus / Plus 1.2 (135×240 portrait, 4 MB fl
 | Wi-Fi Radar | Networks | Include / exclude hidden networks | Home |
 | Wi-Fi Networks | Radar | Next page | Home |
 | Invisible Weather | — | Calm / energized visual | Home |
+| Channel Atlas | Wi-Fi Radar | Display style | Home |
+| RF Atlas | RF Quiet Watch | Select 433 MHz band | Home |
+| RF Quiet Watch | RF Atlas | Arm / disarm activity watch | Home |
+| Trail Echo | Start / stop capture | Toggle score / stats after recording | Home |
 | Sound Scope | Voice Recorder | Clear level | Home |
 | Voice Recorder | Sound Scope | Start / stop recording | Home |
 
@@ -80,14 +84,14 @@ If `NO RECEIVER` is displayed, check the port, keep the Python script running, a
 
 ## Trail Echo — built into SIGNAL OS v3.1
 
-This variant adds **TRAIL ECHO** as home item 6; the existing radio and audio modes are retained.
+This variant includes **TRAIL ECHO** as home item 8; the existing Bluetooth, Wi-Fi and audio modes are retained.
 
-- Home: B cycles to **6 TRAIL ECHO**; A opens.
+- Home: B cycles to **8 TRAIL ECHO**; A opens.
 - Trail Echo: A starts or stops motion recording; after recording, B switches between waveform and statistics. A starts a new ride.
 - Hold A: returns home; any active recording stops and is saved first.
 - Trail Echo samples the on-board IMU at a target of 50 Hz and stores one aggregate bin per second.
 - If SPIFFS is unavailable, the mode works in RAM but indicates **RAM ONLY**.
-- The display dims automatically during recording, returns to normal afterwards.
+- During recording, an animated pulse and scrolling motion visualization run at brightness 112/255; normal brightness returns when recording stops.
 - No GPS: Trail Echo records **time and relative vibration**, not locations, grades, speed or actual terrain difficulty.
 
 See [TRAIL_ECHO.md](TRAIL_ECHO.md) for architecture, limits and checks.
@@ -113,3 +117,17 @@ The optional GPS companion is in [`cardputer-adv/`](cardputer-adv/). Existing SI
 **If 3.0.7 still fails:** share the **full verbose compile log**, board name, installed ESP32 core version and `M5Unified` / `M5GFX` / NimBLE-Arduino versions. In Arduino IDE, File → Preferences → “Show verbose output during compilation”; compile again. We can then inspect the map and identify the IRAM-consuming functions without deleting the BLE, Wi-Fi, audio, Trail Echo or Cardputer bridge features.
 
 **Sources:** [Espressif IRAM troubleshooting](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/performance/ram-usage.html); [Arduino-ESP32 discussion #11062](https://github.com/espressif/arduino-esp32/discussions/11062).
+
+## RF424 integration and live Trail Echo UI (prototype; original Plus 1.x)
+
+SIGNAL OS includes **two new home instruments**: RF Atlas and Channel Atlas. RF Atlas steps through nine 433.2–434.8 MHz tuning points, displaying CC1101 received signal strength. Its A button opens **RF Quiet Watch**, a selectable-frequency activity-gap monitor (B to arm). Channel Atlas displays Wi-Fi channel-derived AP strengths plus available CC1101 readings. Invisible Weather mixes the measured CC1101 signal-energy input into its existing Wi-Fi-based artistic visualization. Trail Echo shows a live motion-reactive pulse, short rolling motion preview, higher recording brightness (**112/255**, previously 16/255), and RF signal energy when active. Original BLE Lost Alert is unchanged.
+
+**Defaults are conservative:** the entire sketch works without an attachment: `SIGNAL_OS_RF424_CC1101` is **0** in `SIGNAL_OS.ino`, meaning **no RadioLib dependency, no RF calls, no RF measurements, and no RF output**. An RF view displays `MODULE OFF`; it never invents readings. To enable the receiver only, install the Arduino **RadioLib** library and change the flag to **1** or provide the macro through the Arduino build flags. Switch the physical PINGEQUA Stick RF 424 to **433 MHz** and attach to the **original M5StickC Plus 1.x** using the vendor wiring. The Bruce legacy mapping for that original Stick is **CC1101 CS=26, GDO0=25, MOSI=32, SCLK=0, MISO=33**; the SPI mapping remains a **hardware-specific assumption** until tested with this exact module. RF424 is physically switchable: nRF24L01+ at 2.4 GHz **cannot be used simultaneously** with the CC1101 433 MHz receiver. The prior Trail Link nRF24 protocol remains a separate unconnected scaffold, not a live transmitter or receiver.
+
+**Important limits:** signal-strength readings are not packet captures, transmitter identification, direction, distance, radio frequency spectrum occupancy, or proof that a particular device is present. The RF Quiet Watch detects a *period with no above-threshold energy after energy was previously observed*, not the loss of a paired beacon; it cannot be used for safety or emergency alerts. If no energy was seen it displays `WAITING FOR ENERGY` rather than a false lost report. No 433 MHz transmissions are implemented. RF use will increase battery consumption; on-device detection, UI legibility, RSSI reliability, recording quality and Arduino compilation with RadioLib enabled require physical validation. The user's original Plus 1.x has previously compiled and booted successfully with the correct **M5StickCPlus** board target, but this new revision has not been flashed.
+
+**Related:** [Trail Link #12](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/12), [Trail Echo #8](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/8), [vendor RF 424](https://www.pingequa.com/pages/support-m5stack-stickc-plus-2-in-1-module), [Bruce CC1101 pin mapping](https://github.com/BruceDevices/firmware/wiki/CC1101), [RadioLib CC1101 class](https://jgromes.github.io/RadioLib/class_c_c1101.html).
+
+Portable host regression: `g++ -std=c++11 -Wall -Wextra -Werror -pedantic tests/test_rf_model.cpp -o /tmp/signal_rf_model && /tmp/signal_rf_model`. Run previous Trail Echo, Trail Link and GPS packet host tests unchanged. **The exact physical RF module and Arduino toolchain must still be tested.**
+
+**RadioLib compatibility:** install exactly **RadioLib 7.8.1** for the opt-in CC1101 receiver. RadioLib **8.0.0** (released November 7, 2026) changed `CC1101::begin` and frequency API types; the header intentionally rejects 8.x until its adapter is ported. With the RF flag left at `0`, RadioLib is not required.

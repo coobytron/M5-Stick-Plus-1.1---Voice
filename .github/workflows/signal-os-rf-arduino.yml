@@ -1,0 +1,43 @@
+name: SIGNAL OS RF424 firmware compile
+on:
+  pull_request:
+    paths:
+      - 'experiments/signal-os/SIGNAL_OS/**'
+      - '.github/workflows/signal-os-rf-arduino.yml'
+  push:
+    branches:
+      - 'feature/trail-echo-live-record-ui'
+    paths:
+      - 'experiments/signal-os/SIGNAL_OS/**'
+      - '.github/workflows/signal-os-rf-arduino.yml'
+jobs:
+  original-stickc-plus:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rf: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install original StickC Plus Espressif core
+        run: |
+          set -euo pipefail
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install 'esp32:esp32@3.0.7' --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+      - name: Install known working Arduino libraries
+        run: |
+          set -euo pipefail
+          arduino-cli lib install M5Unified M5GFX 'NimBLE-Arduino@2.5.1'
+          arduino-cli lib install 'RadioLib@7.8.1'
+      - name: Compile (RF ON requires CC1101 RadioLib 7.8.1)
+        env:
+          RF_MODE: ${{ matrix.rf }}
+        run: |
+          set -euo pipefail
+          arduino-cli compile \
+            --fqbn esp32:esp32:m5stack_stickc_plus \
+            --warnings all \
+            --build-property "build.extra_flags=-DSIGNAL_OS_RF424_CC1101=${RF_MODE}" \
+            --build-path "${RUNNER_TEMP}/signal-rf-build" \
+            experiments/signal-os/SIGNAL_OS
