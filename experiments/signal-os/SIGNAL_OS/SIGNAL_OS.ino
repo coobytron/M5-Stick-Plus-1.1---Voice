@@ -19,6 +19,9 @@
 #include <M5Unified.h>
 #include <M5GFX.h>
 #include "SignalOS_TrailEcho.h"
+// Set to 1 only after Cardputer ESP-NOW RX validation; otherwise no behavior change.
+#define SIGNAL_OS_TRAIL_BRIDGE_ENABLE 0
+#include "TrailBridgeRadio.h"
 #include <NimBLEDevice.h>
 #include <WiFi.h>
 #include <math.h>
@@ -66,6 +69,7 @@ static int channelStrength[14]={};
 static uint16_t BG, PANEL, RULE, RING, MUTED, UI_WHITE, LIME, AMBER, UI_ORANGE, UI_RED;
 static M5Canvas canvas(&M5.Display);
 static trailecho::Mode trailEcho;
+static trailbridge::Sender trailGpsLink;
 static bool trailImuReady=false;
 
 // Audio is transmitted as binary packets (SREC, D, E) at 921600 baud.
@@ -301,6 +305,7 @@ void enter(View next) {
   if(recording && next!=RECORDER)streamStop();
   if(prev==TRAIL_ECHO && next!=TRAIL_ECHO) {
     trailEcho.exit(millis());
+    trailGpsLink.end();
     M5.Display.setBrightness(STANDARD_BRIGHTNESS);
   }
   if(isBle(prev) && !isBle(next))stopBle();
@@ -310,7 +315,7 @@ void enter(View next) {
   if(isBle(next)&&!isBle(prev))startBle();
   if(isWifi(next)&&!isWifi(prev))startWifi();
   if(next==SCOPE)audioMicOn();
-  if(next==TRAIL_ECHO)trailEcho.enter();
+  if(next==TRAIL_ECHO) {trailEcho.enter();trailGpsLink.begin();}
   lastFrame=0;
 }
 
@@ -627,7 +632,9 @@ void onA() {
   else if(view==SCOPE)enter(RECORDER);
   else if(view==RECORDER)enter(SCOPE);
   else if(view==TRAIL_ECHO && trailImuReady) {
+    const bool wasRecording=trailEcho.recording();
     trailEcho.shortA(millis());
+    if(!wasRecording && trailEcho.recording())trailGpsLink.startRide(millis());
     M5.Display.setBrightness(trailEcho.recording()?TRAIL_REC_BRIGHTNESS:STANDARD_BRIGHTNESS);
   }
 }
@@ -713,6 +720,7 @@ void loop() {
   if(view==TRAIL_ECHO) {
     const bool wasRecording=trailEcho.recording();
     trailEcho.update(millis(),readTrailAccel);
+    trailGpsLink.poll(trailEcho.data(),trailEcho.recording(),millis());
     if(wasRecording && !trailEcho.recording())M5.Display.setBrightness(STANDARD_BRIGHTNESS);
   }
   if(recording)streamPump();

@@ -95,3 +95,7 @@ See [TRAIL_ECHO.md](TRAIL_ECHO.md) for architecture, limits and checks.
 ## MTB companion: Trail Link (planned; protocol scaffold only)
 
 In addition to Trail Echo's ride-vibration recorder, the project now tracks **Trail Link**, a proposed small radio check-in between two nRF24-compatible devices. Its 16-byte packet encoder/decoder and peer freshness tracker are host-tested in `SIGNAL_OS/TrailLinkCore.h` and `tests/test_link_core.cpp`. **No radio driver, new menu screen, or transmitted messages are included.** It requires external radio hardware and a second compatible peer for validation. See [TRAIL_LINK.md](TRAIL_LINK.md) and [issue #12](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/12). This is **not** an emergency device or a LoRa/Meshtastic radio.
+
+## Cardputer ADV GPS Bridge (experimental)
+
+The optional GPS companion is in [`cardputer-adv/`](cardputer-adv/). Existing SIGNAL OS modes run unchanged unless `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is changed to `1` in `SIGNAL_OS.ino`. The Cardputer sketch logs GNSS to local microSD and receives ESP-NOW motion packets; visualizations export to GeoJSON and SVG. No SX1262 LoRa transmission or RF424 module is used for this bridge. **Arduino/device testing is pending**. See [Cardputer setup](cardputer-adv/README.md) and issue #13.

@@ -9,7 +9,7 @@ on:
       - 'experiments/signal-os/**'
       - '.github/workflows/signal-os-host.yml'
 jobs:
-  host-protocol-and-trail-echo:
+  host-protocol-trail-and-gps-bridge:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +19,14 @@ jobs:
           set -euo pipefail
           cd experiments/signal-os
           test_dir="$(mktemp -d)"
-          for target in test_core test_mode test_link_core; do
+          for target in test_core test_mode test_link_core test_bridge_wire; do
             g++ -std=c++11 -Wall -Wextra -Werror -pedantic -Itests/fakes "tests/${target}.cpp" -o "${test_dir}/${target}"
             "${test_dir}/${target}"
           done
+      - name: Python route join and SVG tests (standard library only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd experiments/signal-os
+          python3 cardputer-adv/tests/test_route.py
+          python3 cardputer-adv/tests/test_svg.py
