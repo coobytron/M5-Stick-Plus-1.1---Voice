@@ -1,0 +1,59 @@
+name: SIGNAL OS Arduino IRAM compatibility
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/signal-os/**'
+      - '.github/workflows/signal-os-arduino.yml'
+  push:
+    branches:
+      - 'fix/signal-os-iram-build'
+    paths:
+      - 'experiments/signal-os/**'
+      - '.github/workflows/signal-os-arduino.yml'
+jobs:
+  arduino-stickc-plus:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        esp32-core: ['3.0.7', '3.3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install Espressif ESP32 core
+        shell: bash
+        env:
+          CORE_VERSION: ${{ matrix.esp32-core }}
+        run: |
+          set -euo pipefail
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install "esp32:esp32@${CORE_VERSION}" --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+      - name: Install sketch libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli lib install M5Unified M5GFX
+          arduino-cli lib install 'NimBLE-Arduino@2.5.1'
+      - name: Compile original M5StickC Plus sketch
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli compile \
+            --fqbn esp32:esp32:m5stack_stickc_plus \
+            --warnings all \
+            --build-path "${RUNNER_TEMP}/signal-os-build" \
+            --verbose \
+            experiments/signal-os/SIGNAL_OS
+      - name: Preserve linker maps for comparison
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "${RUNNER_TEMP}/linker-map"
+          find "${RUNNER_TEMP}/signal-os-build" -name '*.map' -type f -exec cp '{}' "${RUNNER_TEMP}/linker-map/" ';' || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: signal-os-iram-map-${{ matrix.esp32-core }}
+          path: ${{ runner.temp }}/linker-map
+          if-no-files-found: ignore
