@@ -38,6 +38,6 @@ jobs:
           arduino-cli compile \
             --fqbn esp32:esp32:m5stack_stickc_plus \
             --warnings all \
-            --build-property "compiler.cpp.extra_flags=-DSIGNAL_OS_RF424_CC1101=${RF_MODE}" \
+            --build-property "build.extra_flags=-DSIGNAL_OS_RF424_CC1101=${RF_MODE}" \
             --build-path "${RUNNER_TEMP}/signal-rf-build" \
             experiments/signal-os/SIGNAL_OS
