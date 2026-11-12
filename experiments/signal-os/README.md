@@ -26,6 +26,10 @@ Designed for the original **M5StickC Plus / Plus 1.2 (135×240 portrait, 4 MB fl
 | Wi-Fi Radar | Networks | Include / exclude hidden networks | Home |
 | Wi-Fi Networks | Radar | Next page | Home |
 | Invisible Weather | — | Calm / energized visual | Home |
+| Channel Atlas | Wi-Fi Radar | Display style | Home |
+| RF Atlas | RF Quiet Watch | Select 433 MHz band | Home |
+| RF Quiet Watch | RF Atlas | Arm / disarm activity watch | Home |
+| Trail Echo | Start / stop capture | Toggle score / stats after recording | Home |
 | Sound Scope | Voice Recorder | Clear level | Home |
 | Voice Recorder | Sound Scope | Start / stop recording | Home |
 
@@ -80,14 +84,14 @@ If `NO RECEIVER` is displayed, check the port, keep the Python script running, a
 
 ## Trail Echo — built into SIGNAL OS v3.1
 
-This variant adds **TRAIL ECHO** as home item 6; the existing radio and audio modes are retained.
+This variant includes **TRAIL ECHO** as home item 8; the existing Bluetooth, Wi-Fi and audio modes are retained.
 
-- Home: B cycles to **6 TRAIL ECHO**; A opens.
+- Home: B cycles to **8 TRAIL ECHO**; A opens.
 - Trail Echo: A starts or stops motion recording; after recording, B switches between waveform and statistics. A starts a new ride.
 - Hold A: returns home; any active recording stops and is saved first.
 - Trail Echo samples the on-board IMU at a target of 50 Hz and stores one aggregate bin per second.
 - If SPIFFS is unavailable, the mode works in RAM but indicates **RAM ONLY**.
-- The display dims automatically during recording, returns to normal afterwards.
+- During recording, an animated pulse and scrolling motion visualization run at brightness 112/255; normal brightness returns when recording stops.
 - No GPS: Trail Echo records **time and relative vibration**, not locations, grades, speed or actual terrain difficulty.
 
 See [TRAIL_ECHO.md](TRAIL_ECHO.md) for architecture, limits and checks.
@@ -99,6 +103,20 @@ In addition to Trail Echo's ride-vibration recorder, the project now tracks **Tr
 ## Cardputer ADV GPS Bridge (experimental)
 
 The optional GPS companion is in [`cardputer-adv/`](cardputer-adv/). Existing SIGNAL OS modes run unchanged unless `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is changed to `1` in `SIGNAL_OS.ino`. The Cardputer sketch logs GNSS to local microSD and receives ESP-NOW motion packets; visualizations export to GeoJSON and SVG. No SX1262 LoRa transmission or RF424 module is used for this bridge. **Arduino/device testing is pending**. See [Cardputer setup](cardputer-adv/README.md) and issue #13.
+
+## ESP32 IRAM linker overflow: core-version diagnosis
+
+**Observed on 2026-11-11:** Arduino IDE linked this complete SIGNAL OS sketch with the Espressif `esp-x32/2601` toolchain but failed with `.iram0.text will not fit in region iram0_0_seg`, **2,936 bytes** over the IRAM limit. This is *instruction RAM*, not the flash partition, file storage, or heap. Changing “Partition Scheme” or “Flash Size” is not a fix.
+
+**First reproducible workaround:** in Arduino IDE → **Boards Manager**, choose **`esp32` by Espressif Systems, version `3.0.7`**, then select **Tools → Board → esp32 → M5StickCPlus** (original Plus 1.x, **not M5StickCPlus2**) and click **Verify**. Keep `M5Unified`, `M5GFX`, and `NimBLE-Arduino 2.5.1` installed. If the sketch compiles under 3.0.7, this indicates a toolchain/library IRAM budget difference; it does not by itself establish hardware correctness.
+
+**Why this test:** ESP32 core 3.1.x+ has a documented case of an IRAM overrun in a sketch that links under core 3.0.7 with the same libraries. As the Arduino core bundles precompiled ESP-IDF binaries, adding `-DCONFIG_ESP_WIFI_IRAM_OPT=0` in a sketch cannot rebuild those binary libraries; avoid unverified “RAM size” macros or edits to linker memory maps.
+
+**Automated comparison:** [signal-os-arduino.yml](../../.github/workflows/signal-os-arduino.yml) separately compiles this sketch against core 3.0.7 and 3.3.12 and attempts to preserve the build's linker `.map` files to pinpoint IRAM growth. Neither that job's existence nor a pass in one version demonstrates that the other version will fit.
+
+**If 3.0.7 still fails:** share the **full verbose compile log**, board name, installed ESP32 core version and `M5Unified` / `M5GFX` / NimBLE-Arduino versions. In Arduino IDE, File → Preferences → “Show verbose output during compilation”; compile again. We can then inspect the map and identify the IRAM-consuming functions without deleting the BLE, Wi-Fi, audio, Trail Echo or Cardputer bridge features.
+
+**Sources:** [Espressif IRAM troubleshooting](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/performance/ram-usage.html); [Arduino-ESP32 discussion #11062](https://github.com/espressif/arduino-esp32/discussions/11062).
 
 ## RF424 integration and live Trail Echo UI (prototype; original Plus 1.x)
 
