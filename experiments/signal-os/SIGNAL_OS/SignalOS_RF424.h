@@ -1,5 +1,5 @@
 #pragma once
-// Receive-only CC1101 RF424 sampler for original M5StickC Plus 1.x.
+// CC1101 RF424 sampler and opt-in fixed-code 433.92 MHz remote capture/TX.
 // Build without the RadioLib dependency by leaving RF feature flag = 0.
 #include "SignalOS_RFModel.h"
 #ifndef SIGNAL_OS_RF424_CC1101
@@ -31,6 +31,7 @@ class Sampler {
   }
   void ensure(uint32_t now) {
 #if SIGNAL_OS_RF424_CC1101
+    if(remoteActive_)return;
     if(ready_ || (attempted_ && now-lastAttempt_<4000))return;
     attempted_=true;lastAttempt_=now;
     rfSpi().begin(0,33,32,26);
@@ -45,7 +46,7 @@ class Sampler {
   // not decoded packets, source identity, exact spectrum occupancy, or range.
   bool poll(uint32_t now) {
 #if SIGNAL_OS_RF424_CC1101
-    if(!ready_)return false;
+    if(!ready_ || remoteActive_)return false;
     if(uint32_t(now-lastStep_)<125u)return false;
     const float dBm=radio().getRSSI(); // receiveDirectAsync() gives live RSSI
     int measured=int(dBm);
@@ -67,6 +68,58 @@ class Sampler {
 #endif
   }
   uint8_t reportedBand()const{return reportedBand_;}
+  // Suspend frequency hopping and switch to asynchronous OOK at 433.92 MHz.
+  // Used only in Universal Remote, never transmits on its own.
+  bool startRemote() {
+#if SIGNAL_OS_RF424_CC1101
+    ensure(millis());
+    if(!ready_)return false;
+    if(remoteActive_)return true;
+    radio().standby();
+    if(radio().setOOK(true)!=RADIOLIB_ERR_NONE ||
+       radio().setFrequency(433.92f)!=RADIOLIB_ERR_NONE ||
+       radio().receiveDirectAsync()!=RADIOLIB_ERR_NONE) {
+      ready_=false;return false;
+    }
+    remoteActive_=true;return true;
+#else
+    return false;
+#endif
+  }
+  void endRemote() {
+#if SIGNAL_OS_RF424_CC1101
+    if(!remoteActive_)return;
+    radio().standby();
+    radio().setOOK(false);
+    radio().setFrequency(float(centerKHz(lastBand_))/1000.0f);
+    ready_=(radio().receiveDirectAsync()==RADIOLIB_ERR_NONE);
+    remoteActive_=false;
+#endif
+  }
+  bool sendRemoteRaw(const uint16_t* pulses,uint16_t count,bool firstHigh) {
+#if SIGNAL_OS_RF424_CC1101
+    if(!remoteActive_ || !ready_ || !pulses || count<2 || count>192)return false;
+    radio().standby();
+    pinMode(25,OUTPUT);
+    digitalWrite(25,LOW);
+    const bool started=radio().transmitDirectAsync()==RADIOLIB_ERR_NONE;
+    if(started) {
+      bool level=firstHigh;
+      for(uint16_t i=0;i<count;i++){
+        digitalWrite(25,level?HIGH:LOW);
+        delayMicroseconds(pulses[i]);
+        level=!level;
+      }
+      digitalWrite(25,LOW);
+    }
+    radio().standby();
+    pinMode(25,INPUT);
+    ready_=(radio().receiveDirectAsync()==RADIOLIB_ERR_NONE);
+    return started && ready_;
+#else
+    (void)pulses;(void)count;(void)firstHigh;return false;
+#endif
+  }
  private:
 #if SIGNAL_OS_RF424_CC1101
   static SPIClass& rfSpi(){static SPIClass spi(HSPI);return spi;}
@@ -77,7 +130,7 @@ class Sampler {
     return cc;
   }
 #endif
-  bool ready_=false,attempted_=false;
+  bool ready_=false,attempted_=false,remoteActive_=false;
   uint32_t lastAttempt_=0,lastStep_=0,samples_=0;
   uint8_t lastBand_=0,reportedBand_=0;
   int16_t lastRssi_=kMissing;
