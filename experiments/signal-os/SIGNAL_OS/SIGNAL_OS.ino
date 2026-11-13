@@ -1,5 +1,5 @@
 /*
- SIGNAL OS v3.1 + TRAIL ECHO / M5StickC Plus 1.x (135 x 240 portrait)
+ SIGNAL OS v3.2 + UNIVERSAL REMOTE / M5StickC Plus 1.x (135 x 240 portrait)
  BLE Radar / Device List / Inspector / History / Lost Alert
  Wi-Fi Radar / Network List / RF Atlas / Trail Echo / Universal Remote
 
@@ -18,8 +18,8 @@
 #include <M5Unified.h>
 #include <M5GFX.h>
 #include "SignalOS_TrailEcho.h"
-// Optional 433-MHz CC1101 RX (RF424 switch must be on 433 MHz).
-// Default OFF: preserves the user's confirmed 1.x build and avoids RadioLib.
+// 433-MHz RF424 CC1101, enabled for Universal Remote capture and TX.
+// For IR-only, set flag to 0. RadioLib 7.8.1 is required when enabled.
 #ifndef SIGNAL_OS_RF424_CC1101
 #define SIGNAL_OS_RF424_CC1101 1
 #endif
@@ -502,7 +502,7 @@ void drawRemoteDetail() {
   const auto* c=remoteSelection?universalRemote.library.at(remoteSelection-1):nullptr;
   if(!c){drawRemoteList();return;}
   header(c->kind==signalremote::RF_RAW?"RF / 433":"IR / LED");
-  txt(8,64,safeName(c->name,17),UI_WHITE,2);
+  txt(8,64,safeName(c->name,10),UI_WHITE,2);
   txt(8,93,c->kind==signalremote::RF_RAW?"433.920 MHz":"INFRARED",AMBER);
   txt(8,112,String(c->count)+" PULSES",MUTED);
   const int x0=9,y0=170;
