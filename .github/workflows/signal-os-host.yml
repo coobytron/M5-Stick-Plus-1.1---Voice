@@ -30,3 +30,4 @@ jobs:
           cd experiments/signal-os
           python3 cardputer-adv/tests/test_route.py
           python3 cardputer-adv/tests/test_svg.py
+          python3 tests/test_flipper_ir_import.py
