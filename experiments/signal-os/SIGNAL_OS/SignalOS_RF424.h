@@ -104,13 +104,17 @@ class Sampler {
     digitalWrite(25,LOW);
     const bool started=radio().transmitDirectAsync()==RADIOLIB_ERR_NONE;
     if(started) {
-      bool level=firstHigh;
-      for(uint16_t i=0;i<count;i++){
-        digitalWrite(25,level?HIGH:LOW);
-        delayMicroseconds(pulses[i]);
-        level=!level;
+      pinMode(25,OUTPUT); // GDO0 must be driven by the ESP32 in async TX
+      for(uint8_t repeat=0;repeat<3;repeat++){
+        bool level=firstHigh;
+        for(uint16_t i=0;i<count;i++){
+          digitalWrite(25,level?HIGH:LOW);
+          delayMicroseconds(pulses[i]);
+          level=!level;
+        }
+        digitalWrite(25,LOW);
+        if(repeat<2)delay(12); // common fixed-code repeat gap
       }
-      digitalWrite(25,LOW);
     }
     radio().standby();
     pinMode(25,INPUT);
