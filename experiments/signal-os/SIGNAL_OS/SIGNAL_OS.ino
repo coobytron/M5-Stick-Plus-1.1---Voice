@@ -609,6 +609,19 @@ void drawRecorder() {
   rightTxt(127,208,recording?String(recordedBytes/1024)+" KB":"USB-C",UI_WHITE);
   footer("HOLD A HOME",recording?"B STOP":"B START");
 }
+// B hold on a saved ride resends it to the Cardputer. Covers the bottom
+// line of the score/stats page while it's relevant.
+static uint32_t trailSendNoticeUntil=0;
+static const char* trailSendNotice="";
+void drawTrailSendStatus() {
+  const bool showNotice=int32_t(trailSendNoticeUntil-millis())>0;
+  if(!trailGpsLink.replaying() && !showNotice) return;
+  canvas.fillRect(0,200,WIDTH,16,BG);
+  if(trailGpsLink.replaying())
+    txt(8,204,"SENDING "+String(trailGpsLink.replayPercent())+"%",LIME);
+  else
+    txt(8,204,trailSendNotice,trailGpsLink.active()?LIME:UI_ORANGE);
+}
 // Trail Echo UI is drawn into the SAME canvas as the other instruments.
 // Read and post-ride analysis only: no screen interaction needed while cycling.
 void drawTrailEcho() {
@@ -676,6 +689,7 @@ void drawTrailEcho() {
     if(trailEcho.sensorErrors())txt(8,189,String(trailEcho.sensorErrors())+" READ ERR",UI_ORANGE);
     else txt(8,189,"RELATIVE VIBRATION",MUTED);
     txt(8,204,trailEcho.stored()?"SAVED IN FLASH":"NOT SAVED / RAM ONLY",trailEcho.stored()?MUTED:UI_ORANGE);
+    drawTrailSendStatus();
     footer("A NEW","B SCORE");
   } else {
     txt(8,59,"TERRAIN SIGNATURE",UI_WHITE);
@@ -702,6 +716,7 @@ void drawTrailEcho() {
     txt(8,197,"TIME  /  RMS ACCEL",MUTED);
     rightTxt(127,197,String(fullScale)+"mg",MUTED);
     if(!trailEcho.stored())txt(8,209,"RAM ONLY",UI_ORANGE);
+    drawTrailSendStatus();
     footer("A NEW","B STATS");
   }
 }
@@ -742,6 +757,7 @@ void onA() {
   else if(view==SCOPE)enter(RECORDER);
   else if(view==RECORDER)enter(SCOPE);
   else if(view==TRAIL_ECHO && trailImuReady) {
+    trailGpsLink.stopReplay();
     const bool wasRecording=trailEcho.recording();
     trailEcho.shortA(millis());
     if(!wasRecording && trailEcho.recording()) {
@@ -771,7 +787,15 @@ void onB() {
   else if(view==WEATHER)weatherDense=!weatherDense;
   else if(view==SCOPE)soundLevel=0;
   else if(view==RECORDER){if(recording)streamStop();else streamBegin();}
-  else if(view==TRAIL_ECHO)trailEcho.shortB();
+  else if(view==TRAIL_ECHO){trailGpsLink.stopReplay();trailEcho.shortB();}
+}
+// B hold: send the saved ride to a listening Cardputer (TrailEchoGPS).
+void onBHold() {
+  if(view!=TRAIL_ECHO || trailEcho.recording() || !trailEcho.data().count()) return;
+  if(trailGpsLink.replaying()) {trailGpsLink.stopReplay();trailSendNotice="SEND STOPPED";}
+  else if(trailGpsLink.startReplay(trailEcho.data(),trailEcho.recording(),millis())) trailSendNotice="SENT TWICE";
+  else trailSendNotice=trailGpsLink.active()?"NOTHING TO SEND":"BRIDGE OFF";
+  trailSendNoticeUntil=millis()+4000;
 }
 void pollAudioScope() {
   if(view!=SCOPE || !micReady)return;
@@ -838,12 +862,16 @@ void loop() {
     const bool wasRecording=trailEcho.recording();
     trailEcho.update(millis(),readTrailAccel);
     trailGpsLink.poll(trailEcho.data(),trailEcho.recording(),millis());
+    const bool wasSending=trailGpsLink.replaying();
+    trailGpsLink.pollReplay(trailEcho.data(),millis());
+    if(wasSending && !trailGpsLink.replaying()) trailSendNoticeUntil=millis()+4000;
     if(wasRecording && !trailEcho.recording())M5.Display.setBrightness(STANDARD_BRIGHTNESS);
   }
   if(recording)streamPump();
   if(M5.BtnA.wasHold())enter(HOME);
   else if(M5.BtnA.wasClicked())onA();
-  if(M5.BtnB.wasClicked())onB();
+  if(M5.BtnB.wasHold())onBHold();
+  else if(M5.BtnB.wasClicked())onB();
   uint32_t now=millis();
   if(isWifi(view) && now-lastWifiPoll>150){lastWifiPoll=now;pollWifi();}
   if(usesRf(view)) {

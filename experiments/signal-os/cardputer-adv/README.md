@@ -17,6 +17,10 @@ Cardputer opens a matched pair of new files per boot, such as `G00.CSV` and `I00
 
 `tools/make_route.py` generates an annotated local GeoJSON file from the two CSV logs. The join uses **Cardputer-local milliseconds** for both streams, so timing does not depend on synchronized MCU clocks. Missing GPS or RF observations are excluded, not interpolated.
 
+## Rides sent after the fact
+
+The maintained Cardputer firmware now lives in [cardputer-Synth](https://github.com/coobytron/cardputer-Synth) (`TrailEchoGPS/`, see its `docs/trail-echo-gps.md`). That version also saves a ride the Stick resends with **B hold** as `/TrailEcho/Snn.CSV`. `tools/make_route.py --sync Snn.CSV` merges it; the sketch in this folder does not receive replays.
+
 ## ESP-NOW limitations
 
 - Channel is fixed to **6** on both devices; no AP is required. SIGNAL OS cannot run its Wi-Fi scanner concurrently with the Trail Echo bridge. Entering the Trail Echo view stops the scanner, and leaving it disables the optional bridge.

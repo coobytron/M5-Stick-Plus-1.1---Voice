@@ -21,6 +21,8 @@ This archive was integrated with the exact **SIGNAL_OS_v3_1_fixed** upload. It i
 | Trail Echo score | Start new ride | Statistics | Home |
 | Trail Echo statistics | Start new ride | Score | Home |
 
+On the score or statistics page, **hold B** to send the saved ride to a Cardputer running TrailEchoGPS (only when `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is `1`). The bottom line shows `SENDING n%`; hold B again to stop. See *Send a saved ride* below.
+
 Recording screen dims automatically to reduce distraction while riding. Never interact with the display while riding. Secure the enclosure with a robust mount and secondary tether. The accelerometer does not measure location, GPS, actual suspension travel or calibrated trail difficulty.
 
 ## Data/persistence
@@ -30,6 +32,12 @@ The IMU sampling target is 50 Hz. A slow gravity estimate removes posture; remai
 If SPIFFS mounts, a recording is streamed to `/te-active.bin` and flushed approximately every five seconds. On a normal stop it becomes `/te-last.bin`. The previous completed ride is retained in `/te-recovered.bin` until overwritten by a later ride. After unexpected reboot the active file is salvaged, if possible. Starting a new recording clears the previous **in-memory** ride view but does not delete the completed flash file until a new ride is finalized. A recording stopped with zero completed bins leaves the previous saved ride intact.
 
 If storage fails, the device warns `RAM ONLY` and still records into volatile memory. `SENSOR UNAVAILABLE` prevents starting if M5Unified does not detect the IMU. Sensor dropouts are counted and reported.
+
+## Send a saved ride (after the fact)
+
+Live packets only reach the Cardputer if it was listening during the ride. To capture a ride afterwards, open Trail Echo on the Stick with the ride on screen, put the Cardputer (TrailEchoGPS, from [cardputer-Synth](https://github.com/coobytron/cardputer-Synth)) within a few metres, and hold B. The Stick resends every saved second twice over ESP-NOW channel 6 as kind-2 *replay* packets (`TrailBridgeWire.h`), about 6 ms apart, so a 20-minute ride takes roughly 15 s. The Cardputer saves it as `/TrailEcho/Snn.CSV`. Older receivers ignore replay packets.
+
+The replay carries the ride ID only if the ride was recorded since the Stick was switched on; after a restart the ID is `0`. The route script then needs the ride's start time (`--start-utc`) to place it on the GPS track, because the Stick has no clock. Seconds that never arrive stay missing.
 
 ## Tests and caveats
 
