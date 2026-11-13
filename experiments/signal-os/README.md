@@ -1,4 +1,4 @@
-# SIGNAL OS v3.1 (compiler fix) — M5StickC Plus 1.x
+# SIGNAL OS v3.2 — Universal RF + IR Remote (original M5StickC Plus 1.x)
 
 A small pocket-instrument interface with a graphite and acid-green palette.
 **Fix in v3.1:** Renamed custom color constants `WHITE`, `RED`, and `ORANGE` to `UI_WHITE`, `UI_RED`, and `UI_ORANGE` to prevent ambiguity with M5GFX color constants. No intended behavior changes.
@@ -7,62 +7,49 @@ Designed for the original **M5StickC Plus / Plus 1.2 (135×240 portrait, 4 MB fl
 
 ## Included
 
-- **Bluetooth**: Precision Sonar-style radar, named device list, inspection panel, RSSI history, and selected-device lost-signal watch. RSSI is approximate. Visual device angles are not real direction measurements.
-- **Wi-Fi Radar**: scans nearby 2.4 GHz network access points without joining them; dots based on RSSI, with a channel/strength list.
-- **Invisible Weather**: generative visualization of the Wi-Fi signals observed during periodic scans (not a packet sniffer, RF spectrum analyzer, or real network traffic meter).
-- **Sound Scope**: microphone level visualization.
-- **Voice Notes**: button-controlled microphone recordings streamed to your Mac over the USB-C programming connection, then saved as 16 kHz 16-bit mono WAV by the supplied Python helper. No audio files are saved to the M5Stick itself.
+- **Bluetooth**: BLE Radar, named device list, inspector, RSSI history and Lost Alert.
+- **Wi-Fi Radar**: 2.4 GHz access-point scan, channel list and RSSI.
+- **Channel Atlas**: Wi-Fi AP channel strengths and optional CC1101 signal survey.
+- **RF Atlas / Quiet Watch**: 433 MHz signal-level survey and activity-gap view.
+- **Trail Echo**: IMU motion-based ride recorder, local storage when SPIFFS is mounted.
+- **Universal Remote (new)**: capture/save/replay compatible **fixed-code 433.92 MHz** signals with the PINGEQUA Stick RF 424 CC1101; import Flipper Zero RAW or NEC IR files for transmission through the original Plus's built-in IR LED (GPIO9). See [Universal Remote guide](UNIVERSAL_REMOTE.md).
+
+Removed from this firmware: **Invisible WX, Sound Scope and Voice Record**. These no longer consume menu slots or compile into the sketch.
 
 ## Controls
 
 | Location | Button A | Button B | Hold A |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Home | Open selected instrument | Next instrument | — |
 | Bluetooth Radar | Device list | All / named-only | Home |
-| Bluetooth List | Inspector | Next selected device | Home |
-| Inspector | Signal history | Next selected device | Home |
-| Signal History | Lost-device alert | Next selected device | Home |
-| Lost-device alert | Radar | Arm / disarm selected device | Home |
-| Wi-Fi Radar | Networks | Include / exclude hidden networks | Home |
+| Bluetooth List / Inspector / History | Next BLE screen | Next device | Home |
+| BLE Lost Alert | Radar | Arm / disarm | Home |
+| Wi-Fi Radar | Networks | Hidden networks on/off | Home |
 | Wi-Fi Networks | Radar | Next page | Home |
-| Invisible Weather | — | Calm / energized visual | Home |
 | Channel Atlas | Wi-Fi Radar | Display style | Home |
-| RF Atlas | RF Quiet Watch | Select 433 MHz band | Home |
-| RF Quiet Watch | RF Atlas | Arm / disarm activity watch | Home |
-| Trail Echo | Start / stop capture | Toggle score / stats after recording | Home |
-| Sound Scope | Voice Recorder | Clear level | Home |
-| Voice Recorder | Sound Scope | Start / stop recording | Home |
+| RF Atlas | RF Quiet Watch | Next frequency | Home |
+| RF Quiet Watch | RF Atlas | Arm / disarm | Home |
+| Trail Echo | Record / stop | Score / stats | Home |
+| Universal Remote | Open selected / learn RF | Next entry | Home |
+| RF Learn | Retry capture | Library | Home |
+| Saved Remote | Transmit RF or IR once | Library | Home |
 
-Button A is the front button; B is the side button. The voice note records *only when you press B to start and shows an active red REC status*.
+The new Home menu contains six instruments (Bluetooth, Wi-Fi Radar, Channel Atlas, RF Atlas, Trail Echo, Universal). The built-in IR diode **cannot learn** codes; use a Flipper Zero .ir import or external IR receiver.
 
 ## Install firmware (Arduino IDE on Mac)
 
 1. Select **the same ESP32 board and USB port settings that worked with Precision Sonar v2**.
-2. In Library Manager install **M5Unified** (version **0.2.22 or newer**), M5GFX (usually pulled in by M5Unified), and **NimBLE-Arduino 2.5.1**.
+2. In Library Manager install **M5Unified** (version **0.2.22 or newer**), M5GFX (usually pulled in by M5Unified), **NimBLE-Arduino 2.5.1** and **RadioLib 7.8.1**.
 3. Open `SIGNAL_OS/SIGNAL_OS.ino` and upload.
 4. Press **B** on the home screen to cycle apps and **A** to open an app. Hold A to return home.
 
-Wi-Fi Radar and Invisible Weather scan without requiring your SSID or password. The M5StickC Plus only supports 2.4 GHz Wi-Fi, so 5 GHz and 6 GHz access points will not appear. Only access points transmitting beacons are visible; this is *not* a sniffer of personal devices or packets.
+Wi-Fi Radar scans without requiring your SSID or password. The M5StickC Plus only supports 2.4 GHz Wi-Fi, so 5 GHz and 6 GHz access points will not appear. Only access points transmitting beacons are visible; this is *not* a sniffer of personal devices or packets.
 
-## Voice notes → Mac
+## Universal Remote → Flipper import
 
-1. With the M5Stick plugged into USB-C, identify its port under Arduino IDE **Tools → Port** (example `/dev/cu.SLAB_USBtoUART`).
-2. Quit Arduino Serial Monitor (it competes for the same serial port).
-3. Open Terminal in the extracted `SIGNAL_OS_v3_1_fixed` folder and run:
+See [UNIVERSAL_REMOTE.md](UNIVERSAL_REMOTE.md) for RF learning, saved commands, IR import (Python + pyserial), controls, and physical validation checklist.
 
-    ```sh
-    python3 -m venv .venv
-    .venv/bin/python -m pip install pyserial
-    .venv/bin/python record_on_mac.py /dev/cu.SLAB_USBtoUART
-    ```
-
-    Substitute the **actual port from your Mac**.
-4. On the M5Stick open **VOICE REC**. When `HOST READY` appears, press **B** to record; press **B** to stop.
-5. Saved files appear under `SIGNAL_OS_v3_1_fixed/recordings/signal_YYYYMMDD_HHMMSS.wav`.
-
-No audio is uploaded to a cloud service. The Python receiver only writes audio to your Mac.
-
-If `NO RECEIVER` is displayed, check the port, keep the Python script running, and ensure the Arduino Serial Monitor is closed. The receiver uses **921600 baud**.
+**Important:** this is the original **M5StickC Plus 1.x** sketch. Its IR transmitter is **GPIO9**, while Plus2 uses GPIO19. The RF424 physical switch must be at **433 MHz** for CC1101 capture/replay.
 
 ## Notes / limitations
 
@@ -84,9 +71,9 @@ If `NO RECEIVER` is displayed, check the port, keep the Python script running, a
 
 ## Trail Echo — built into SIGNAL OS v3.1
 
-This variant includes **TRAIL ECHO** as home item 8; the existing Bluetooth, Wi-Fi and audio modes are retained.
+This variant includes **TRAIL ECHO** as home item 5; Bluetooth and Wi-Fi remain, while audio modes have been removed.
 
-- Home: B cycles to **8 TRAIL ECHO**; A opens.
+- Home: B cycles to **5 TRAIL ECHO**; A opens.
 - Trail Echo: A starts or stops motion recording; after recording, B switches between waveform and statistics. A starts a new ride.
 - Hold A: returns home; any active recording stops and is saved first.
 - Trail Echo samples the on-board IMU at a target of 50 Hz and stores one aggregate bin per second.
@@ -122,9 +109,9 @@ The optional GPS companion is in [`cardputer-adv/`](cardputer-adv/). Existing SI
 
 SIGNAL OS includes **two new home instruments**: RF Atlas and Channel Atlas. RF Atlas steps through nine 433.2–434.8 MHz tuning points, displaying CC1101 received signal strength. Its A button opens **RF Quiet Watch**, a selectable-frequency activity-gap monitor (B to arm). Channel Atlas displays Wi-Fi channel-derived AP strengths plus available CC1101 readings. Invisible Weather mixes the measured CC1101 signal-energy input into its existing Wi-Fi-based artistic visualization. Trail Echo shows a live motion-reactive pulse, short rolling motion preview, higher recording brightness (**112/255**, previously 16/255), and RF signal energy when active. Original BLE Lost Alert is unchanged.
 
-**Defaults are conservative:** the entire sketch works without an attachment: `SIGNAL_OS_RF424_CC1101` is **0** in `SIGNAL_OS.ino`, meaning **no RadioLib dependency, no RF calls, no RF measurements, and no RF output**. An RF view displays `MODULE OFF`; it never invents readings. To enable the receiver only, install the Arduino **RadioLib** library and change the flag to **1** or provide the macro through the Arduino build flags. Switch the physical PINGEQUA Stick RF 424 to **433 MHz** and attach to the **original M5StickC Plus 1.x** using the vendor wiring. The Bruce legacy mapping for that original Stick is **CC1101 CS=26, GDO0=25, MOSI=32, SCLK=0, MISO=33**; the SPI mapping remains a **hardware-specific assumption** until tested with this exact module. RF424 is physically switchable: nRF24L01+ at 2.4 GHz **cannot be used simultaneously** with the CC1101 433 MHz receiver. The prior Trail Link nRF24 protocol remains a separate unconnected scaffold, not a live transmitter or receiver.
+**RF 424 configuration:** In v3.2 the compile-time flag `SIGNAL_OS_RF424_CC1101` defaults to **1**, which requires RadioLib **7.8.1**. Set it to **0** for an IR-only build without the RF424 module. RF Atlas has no fabricated readings when the radio is absent.
 
-**Important limits:** signal-strength readings are not packet captures, transmitter identification, direction, distance, radio frequency spectrum occupancy, or proof that a particular device is present. The RF Quiet Watch detects a *period with no above-threshold energy after energy was previously observed*, not the loss of a paired beacon; it cannot be used for safety or emergency alerts. If no energy was seen it displays `WAITING FOR ENERGY` rather than a false lost report. No 433 MHz transmissions are implemented. RF use will increase battery consumption; on-device detection, UI legibility, RSSI reliability, recording quality and Arduino compilation with RadioLib enabled require physical validation. The user's original Plus 1.x has previously compiled and booted successfully with the correct **M5StickCPlus** board target, but this new revision has not been flashed.
+**Important limits:** signal-strength readings are not packet captures, transmitter identification, direction, distance, radio frequency spectrum occupancy, or proof that a particular device is present. The RF Quiet Watch detects a *period with no above-threshold energy after energy was previously observed*, not the loss of a paired beacon; it cannot be used for safety or emergency alerts. If no energy was seen it displays `WAITING FOR ENERGY` rather than a false lost report. The Universal Remote now offers deliberate, button-initiated 433.92 MHz OOK raw replay for authorized fixed-code devices; RF Atlas itself remains receive-only. RF use will increase battery consumption; on-device detection, UI legibility, RSSI reliability, recording quality and Arduino compilation with RadioLib enabled require physical validation. The user's original Plus 1.x has previously compiled and booted successfully with the correct **M5StickCPlus** board target, but this new revision has not been flashed.
 
 **Related:** [Trail Link #12](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/12), [Trail Echo #8](https://github.com/coobytron/M5-Stick-Plus-1.1---Voice/issues/8), [vendor RF 424](https://www.pingequa.com/pages/support-m5stack-stickc-plus-2-in-1-module), [Bruce CC1101 pin mapping](https://github.com/BruceDevices/firmware/wiki/CC1101), [RadioLib CC1101 class](https://jgromes.github.io/RadioLib/class_c_c1101.html).
 
