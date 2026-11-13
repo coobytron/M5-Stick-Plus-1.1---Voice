@@ -26,7 +26,10 @@
 #endif
 #include "SignalOS_RF424.h"
 // Set to 1 only after Cardputer ESP-NOW RX validation; otherwise no behavior change.
+// (CI also compiles it with -DSIGNAL_OS_TRAIL_BRIDGE_ENABLE=1.)
+#ifndef SIGNAL_OS_TRAIL_BRIDGE_ENABLE
 #define SIGNAL_OS_TRAIL_BRIDGE_ENABLE 0
+#endif
 #include "TrailBridgeRadio.h"
 #include <NimBLEDevice.h>
 #include <WiFi.h>
