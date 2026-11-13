@@ -467,6 +467,54 @@ void drawRfWatch() {
   footer("A ATLAS","B ARM/OFF");
 }
 
+void drawRemoteList() {
+  header(String(universalRemote.library.size())+" SAVED");
+  txt(8,60,"UNIVERSAL REMOTE",UI_WHITE);
+  txt(8,75,"433 MHz + INFRARED",MUTED);
+  const uint8_t maxIdx=universalRemote.library.size();
+  if(remoteSelection>maxIdx)remoteSelection=maxIdx;
+  const int first=remoteSelection>=6?remoteSelection-5:0;
+  for(int row=0;row<7 && first+row<=maxIdx;row++){
+    const int index=first+row,y=91+row*18;
+    const bool selected=index==remoteSelection;
+    if(selected) {canvas.fillRoundRect(7,y-2,121,17,3,PANEL);canvas.fillRect(7,y-2,2,17,LIME);}
+    if(index==0){txt(14,y,"+ LEARN 433 RF",selected?LIME:UI_WHITE);}
+    else {
+      const auto* c=universalRemote.library.at(index-1);
+      if(!c)continue;
+      txt(14,y,safeName(c->name,14),selected?LIME:UI_WHITE);
+      rightTxt(126,y,c->kind==signalremote::RF_RAW?"RF":"IR",c->kind==signalremote::RF_RAW?AMBER:MUTED);
+    }
+  }
+  footer("A OPEN","B NEXT");
+}
+void drawRemoteCapture() {
+  header(universalRemote.rfReady()?"CC1101 / RX":"RF OFF");
+  txt(8,61,"LEARN / 433.92",UI_WHITE,2);
+  txt(8,97,"PRESS REMOTE BUTTON",MUTED);
+  txt(8,117,universalRemote.status(),universalRemote.capturing()?LIME:UI_ORANGE);
+  txt(8,155,"FIXED-CODE OOK / ASK",MUTED);
+  txt(8,171,"NO ROLLING CODES",MUTED);
+  txt(8,188,"AUTO-SAVES WHEN SEEN",UI_WHITE);
+  footer("A RETRY","B BACK");
+}
+void drawRemoteDetail() {
+  const auto* c=remoteSelection?universalRemote.library.at(remoteSelection-1):nullptr;
+  if(!c){drawRemoteList();return;}
+  header(c->kind==signalremote::RF_RAW?"RF / 433":"IR / LED");
+  txt(8,64,safeName(c->name,17),UI_WHITE,2);
+  txt(8,93,c->kind==signalremote::RF_RAW?"433.920 MHz":"INFRARED",AMBER);
+  txt(8,112,String(c->count)+" PULSES",MUTED);
+  const int x0=9,y0=170;
+  for(int i=0;i<119;i++){
+    const uint16_t j=uint16_t(i)*c->count/119;
+    const int h=4+min(40,int(c->pulses[j]/150));
+    canvas.drawFastVLine(x0+i,y0-h,h,(j%2)?dim(LIME,90):LIME);
+  }
+  txt(8,187,universalRemote.status(),MUTED);
+  txt(8,205,"ONLY YOUR OWN DEVICES",MUTED);
+  footer("A TRANSMIT","B BACK");
+}
 // Trail Echo UI is drawn into the SAME canvas as the other instruments.
 // Read and post-ride analysis only: no screen interaction needed while cycling.
 void drawTrailEcho() {
@@ -575,20 +623,20 @@ void draw() {
     case BLE_ALERT:drawBleAlert();break;
     case WIFI_RADAR:drawWifiRadar();break;
     case WIFI_LIST:drawWifiList();break;
-    case WEATHER:drawWeather();break;
     case CHANNEL_ATLAS:drawChannelAtlas();break;
     case RF_ATLAS:drawRfAtlas();break;
     case RF_WATCH:drawRfWatch();break;
-    case SCOPE:drawScope();break;
-    case RECORDER:drawRecorder();break;
     case TRAIL_ECHO:drawTrailEcho();break;
+    case REMOTE_LIST:drawRemoteList();break;
+    case REMOTE_CAPTURE:drawRemoteCapture();break;
+    case REMOTE_DETAIL:drawRemoteDetail();break;
   }
   canvas.pushSprite(0,0);
 }
 
 void onA() {
   if(view==HOME) {
-    static const View choices[]={BLE_RADAR,WIFI_RADAR,CHANNEL_ATLAS,WEATHER,RF_ATLAS,SCOPE,RECORDER,TRAIL_ECHO};
+    static const View choices[]={BLE_RADAR,WIFI_RADAR,CHANNEL_ATLAS,RF_ATLAS,TRAIL_ECHO,REMOTE_LIST};
     enter(choices[homeSelection]);
   } else if(isBle(view)) {
     enter(view==BLE_ALERT?BLE_RADAR:(View)((int)view+1));
@@ -597,8 +645,12 @@ void onA() {
   else if(view==CHANNEL_ATLAS)enter(WIFI_RADAR);
   else if(view==RF_ATLAS)enter(RF_WATCH);
   else if(view==RF_WATCH)enter(RF_ATLAS);
-  else if(view==SCOPE)enter(RECORDER);
-  else if(view==RECORDER)enter(SCOPE);
+  else if(view==REMOTE_LIST) {
+    if(remoteSelection==0)enter(REMOTE_CAPTURE);
+    else enter(REMOTE_DETAIL);
+  }
+  else if(view==REMOTE_CAPTURE)universalRemote.startCapture();
+  else if(view==REMOTE_DETAIL && remoteSelection>0)universalRemote.send(remoteSelection-1,rfSampler);
   else if(view==TRAIL_ECHO && trailImuReady) {
     const bool wasRecording=trailEcho.recording();
     trailEcho.shortA(millis());
@@ -626,9 +678,8 @@ void onB() {
   else if(view==CHANNEL_ATLAS)atlasContrast=!atlasContrast;
   else if(view==RF_ATLAS) {rfWatchBand=uint8_t((rfWatchBand+1u)%signalrf::kBands);rfQuietWatch.arm(false,millis());}
   else if(view==RF_WATCH)rfQuietWatch.arm(!rfQuietWatch.armed(),millis());
-  else if(view==WEATHER)weatherDense=!weatherDense;
-  else if(view==SCOPE)soundLevel=0;
-  else if(view==RECORDER){if(recording)streamStop();else streamBegin();}
+  else if(view==REMOTE_LIST)remoteSelection=uint8_t((remoteSelection+1)%(universalRemote.library.size()+1));
+  else if(view==REMOTE_CAPTURE || view==REMOTE_DETAIL)enter(REMOTE_LIST);
   else if(view==TRAIL_ECHO)trailEcho.shortB();
 }
 void tickHistory() {
@@ -660,6 +711,29 @@ static bool readTrailAccel(float& x,float& y,float& z) {
   return M5.Imu.getAccel(&x,&y,&z);
 }
 
+void pollRemoteSerial(){
+  // Commands are local USB-only; transmission requires an explicit A press.
+  while(Serial.available()){
+    const char c=char(Serial.read());
+    if(c=='\n'||c=='\r'){
+      if(remoteLine.length()){
+        if(remoteLine=="LIST"){
+          Serial.printf("REMOTE ITEMS %u\n",unsigned(universalRemote.library.size()));
+          for(uint8_t i=0;i<universalRemote.library.size();i++){
+            const auto* item=universalRemote.library.at(i);
+            Serial.printf("%u|%s|%s|%u\n",unsigned(i),item->name,
+                          item->kind==signalremote::RF_RAW?"RF":"IR",unsigned(item->count));
+          }
+        }else {
+          const bool ok=universalRemote.library.importLine(remoteLine);
+          Serial.println(ok?"REMOTE OK":"REMOTE INVALID OR STORAGE FULL");
+        }
+        remoteLine="";
+      }
+    }else if(c>=32 && c<=126 && remoteLine.length()<1750)remoteLine+=c;
+    else if(remoteLine.length()>=1750)remoteLine="";
+  }
+}
 void setup() {
   auto cfg=M5.config();M5.begin(cfg);
   trailImuReady=M5.Imu.isEnabled();
@@ -667,7 +741,7 @@ void setup() {
   universalRemote.begin(); // Loads saved remotes; never formats flash.
 
   M5.Display.setRotation(0); M5.Display.setBrightness(STANDARD_BRIGHTNESS);
-  Serial.begin(921600); // host receiver must use identical baud
+  Serial.begin(921600); // also accepts IRRAW/RENAME/DELETE remote library commands
   BG=rgb(8,13,17);PANEL=rgb(24,41,34);RULE=rgb(43,57,58);
   RING=rgb(48,67,65);MUTED=rgb(125,145,147);UI_WHITE=rgb(238,244,239);
   LIME=rgb(173,255,112);AMBER=rgb(238,193,104);
