@@ -3,6 +3,7 @@
 // Designed for M5StickC Plus 1.x (IR TX GPIO9; CC1101 GDO0 GPIO25).
 // Local-only: no cloud, no transmit on boot, no filesystem formatting.
 #include <Arduino.h>
+#include <new>
 #include <SPIFFS.h>
 #include "SignalOS_RF424.h"
 
@@ -146,8 +147,16 @@ private:
     size_t written=f.write(reinterpret_cast<const uint8_t*>(image),sizeof(*image));
     f.close();delete image;
     if(written!=sizeof(FileImage)){SPIFFS.remove("/signal_remotes_tmp.bin");return false;}
-    SPIFFS.remove(STORAGE);
-    if(!SPIFFS.rename("/signal_remotes_tmp.bin",STORAGE))return false;
+    // Keep a recoverable copy until the replacement is in place.
+    SPIFFS.remove("/signal_remotes_bak.bin");
+    if(SPIFFS.exists(STORAGE) &&
+       !SPIFFS.rename(STORAGE,"/signal_remotes_bak.bin"))return false;
+    if(!SPIFFS.rename("/signal_remotes_tmp.bin",STORAGE)){
+      if(SPIFFS.exists("/signal_remotes_bak.bin"))
+        SPIFFS.rename("/signal_remotes_bak.bin",STORAGE);
+      return false;
+    }
+    SPIFFS.remove("/signal_remotes_bak.bin");
     return true;
   }
   bool available_=false;
