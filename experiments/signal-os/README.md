@@ -29,7 +29,7 @@ Removed from this firmware: **Invisible WX, Sound Scope and Voice Record**. Thes
 | Channel Atlas | Wi-Fi Radar | Display style | Home |
 | RF Atlas | RF Quiet Watch | Next frequency | Home |
 | RF Quiet Watch | RF Atlas | Arm / disarm | Home |
-| Trail Echo | Record / stop | Score / stats | Home |
+| Trail Echo | Record / stop | Score / stats; **hold B** to send saved ride to Cardputer | Home |
 | Universal Remote | Open selected / learn RF | Next entry | Home |
 | RF Learn | Retry capture | Library | Home |
 | Saved Remote | Transmit RF or IR once | Library | Home |
@@ -69,13 +69,14 @@ See [UNIVERSAL_REMOTE.md](UNIVERSAL_REMOTE.md) for RF learning, saved commands, 
 - https://github.com/h2zero/NimBLE-Arduino
 
 
-## Trail Echo — built into SIGNAL OS v3.1
+## Trail Echo — built into SIGNAL OS v3.2
 
 This variant includes **TRAIL ECHO** as home item 5; Bluetooth and Wi-Fi remain, while audio modes have been removed.
 
 - Home: B cycles to **5 TRAIL ECHO**; A opens.
 - Trail Echo: A starts or stops motion recording; after recording, B switches between waveform and statistics. A starts a new ride.
 - Hold A: returns home; any active recording stops and is saved first.
+- Hold B on the score or statistics page: sends the saved ride to a Cardputer running TrailEchoGPS (only when `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is `1`). The bottom line shows `SENDING n%`, then `SENT TWICE`; hold B again to stop (`SEND STOPPED`). See [Send a saved ride](TRAIL_ECHO.md#send-a-saved-ride-after-the-fact).
 - Trail Echo samples the on-board IMU at a target of 50 Hz and stores one aggregate bin per second.
 - If SPIFFS is unavailable, the mode works in RAM but indicates **RAM ONLY**.
 - During recording, an animated pulse and scrolling motion visualization run at brightness 112/255; normal brightness returns when recording stops.
@@ -89,7 +90,9 @@ In addition to Trail Echo's ride-vibration recorder, the project now tracks **Tr
 
 ## Cardputer ADV GPS Bridge (experimental)
 
-The optional GPS companion is in [`cardputer-adv/`](cardputer-adv/). Existing SIGNAL OS modes run unchanged unless `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is changed to `1` in `SIGNAL_OS.ino`. The Cardputer sketch logs GNSS to local microSD and receives ESP-NOW motion packets; visualizations export to GeoJSON and SVG. No SX1262 LoRa transmission or RF424 module is used for this bridge. **Arduino/device testing is pending**. See [Cardputer setup](cardputer-adv/README.md) and issue #13.
+The maintained Cardputer firmware is **TrailEchoGPS** in [cardputer-Synth](https://github.com/coobytron/cardputer-Synth/tree/main/TrailEchoGPS) (Launcher `.bin` on its releases; guide in its `docs/trail-echo-gps.md`). It logs live packets and also saves a ride the Stick resends with **B hold** as `/TrailEcho/Snn.CSV`, so a ride recorded while the Cardputer was off or out of range can still be put on the GPS route. The older candidate sketch in [`cardputer-adv/`](cardputer-adv/) does not receive resends.
+
+The original candidate sketch is in [`cardputer-adv/`](cardputer-adv/). Existing SIGNAL OS modes run unchanged unless `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is changed to `1` in `SIGNAL_OS.ino`. The Cardputer sketch logs GNSS to local microSD and receives ESP-NOW motion packets; visualizations export to GeoJSON and SVG. No SX1262 LoRa transmission or RF424 module is used for this bridge. **Arduino/device testing is pending**. See [Cardputer setup](cardputer-adv/README.md) and issue #13.
 
 ## ESP32 IRAM linker overflow: core-version diagnosis
 
@@ -101,13 +104,13 @@ The optional GPS companion is in [`cardputer-adv/`](cardputer-adv/). Existing SI
 
 **Automated comparison:** [signal-os-arduino.yml](../../.github/workflows/signal-os-arduino.yml) separately compiles this sketch against core 3.0.7 and 3.3.12 and attempts to preserve the build's linker `.map` files to pinpoint IRAM growth. Neither that job's existence nor a pass in one version demonstrates that the other version will fit.
 
-**If 3.0.7 still fails:** share the **full verbose compile log**, board name, installed ESP32 core version and `M5Unified` / `M5GFX` / NimBLE-Arduino versions. In Arduino IDE, File → Preferences → “Show verbose output during compilation”; compile again. We can then inspect the map and identify the IRAM-consuming functions without deleting the BLE, Wi-Fi, audio, Trail Echo or Cardputer bridge features.
+**If 3.0.7 still fails:** share the **full verbose compile log**, board name, installed ESP32 core version and `M5Unified` / `M5GFX` / NimBLE-Arduino versions. In Arduino IDE, File → Preferences → “Show verbose output during compilation”; compile again. We can then inspect the map and identify the IRAM-consuming functions without deleting the BLE, Wi-Fi, Trail Echo or Cardputer bridge features.
 
 **Sources:** [Espressif IRAM troubleshooting](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/performance/ram-usage.html); [Arduino-ESP32 discussion #11062](https://github.com/espressif/arduino-esp32/discussions/11062).
 
 ## RF424 integration and live Trail Echo UI (prototype; original Plus 1.x)
 
-SIGNAL OS includes **two new home instruments**: RF Atlas and Channel Atlas. RF Atlas steps through nine 433.2–434.8 MHz tuning points, displaying CC1101 received signal strength. Its A button opens **RF Quiet Watch**, a selectable-frequency activity-gap monitor (B to arm). Channel Atlas displays Wi-Fi channel-derived AP strengths plus available CC1101 readings. Invisible Weather mixes the measured CC1101 signal-energy input into its existing Wi-Fi-based artistic visualization. Trail Echo shows a live motion-reactive pulse, short rolling motion preview, higher recording brightness (**112/255**, previously 16/255), and RF signal energy when active. Original BLE Lost Alert is unchanged.
+SIGNAL OS includes **two new home instruments**: RF Atlas and Channel Atlas. RF Atlas steps through nine 433.2–434.8 MHz tuning points, displaying CC1101 received signal strength. Its A button opens **RF Quiet Watch**, a selectable-frequency activity-gap monitor (B to arm). Channel Atlas displays Wi-Fi channel-derived AP strengths plus available CC1101 readings. Trail Echo shows a live motion-reactive pulse, short rolling motion preview, higher recording brightness (**112/255**, previously 16/255), and RF signal energy when active. Original BLE Lost Alert is unchanged.
 
 **RF 424 configuration:** In v3.2 the compile-time flag `SIGNAL_OS_RF424_CC1101` defaults to **1**, which requires RadioLib **7.8.1**. Set it to **0** for an IR-only build without the RF424 module. RF Atlas has no fabricated readings when the radio is absent.
 
