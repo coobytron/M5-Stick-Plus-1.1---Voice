@@ -8,6 +8,8 @@ namespace trailbridge {
 static const size_t kPacketSize = 22;
 static const uint8_t kVersion = 1;
 static const uint8_t kMotion = 1;
+static const uint8_t kReplay = 2;  // a saved ride resent after it was recorded
+static const uint16_t kMaxReplayBins = 7200;  // Trail Echo's 2-hour cap
 
 struct Motion {
   uint32_t rideId;
@@ -62,5 +64,75 @@ class Receiver {
   uint32_t gaps()const{return gaps_;}
  private:
   bool known_;uint32_t ride_;uint16_t seq_;uint32_t accepted_,duplicates_,gaps_;
+};
+
+// Replay: the Stick resends a ride it already saved, one packet per 1-second
+// bin. Same 22-byte frame as Motion, kind 2, so older receivers just drop it.
+//   4-7 rideId (0 = unknown, e.g. the Stick was restarted since the ride)
+//   8-9 bin index from 0, 10-11 total bins, 12-13 rmsMg, 14 peak10Mg,
+//   15 impacts, 16-19 sendId (random per send, groups one transfer)
+struct Replay {
+  uint32_t rideId;
+  uint16_t index;
+  uint16_t total;
+  uint16_t rmsMg;
+  uint8_t peak10Mg;
+  uint8_t impacts;
+  uint32_t sendId;
+};
+inline void encodeReplay(const Replay& r, uint8_t out[kPacketSize]) {
+  out[0]='T';out[1]='E';out[2]=kVersion;out[3]=kReplay;
+  put32(out+4,r.rideId);put16(out+8,r.index);put16(out+10,r.total);
+  put16(out+12,r.rmsMg);out[14]=r.peak10Mg;out[15]=r.impacts;
+  put32(out+16,r.sendId);put16(out+20,crc16(out,20));
+}
+inline bool decodeReplay(const uint8_t* in, size_t len, Replay& out) {
+  if(!in||len!=kPacketSize||in[0]!='T'||in[1]!='E'||in[2]!=kVersion||in[3]!=kReplay) return false;
+  if(get16(in+20)!=crc16(in,20)) return false;
+  Replay r;
+  r.rideId=get32(in+4);r.index=get16(in+8);r.total=get16(in+10);
+  r.rmsMg=get16(in+12);r.peak10Mg=in[14];r.impacts=in[15];r.sendId=get32(in+16);
+  if(r.sendId==0||r.total==0||r.total>kMaxReplayBins||r.index>=r.total) return false;
+  out=r;return true;
+}
+
+// Receiver side of a replay: collects one transfer's bins in RAM (about
+// 30 KB, so only instantiate it on the Cardputer). Repeats are ignored;
+// bins that never arrive stay missing and are reported, never filled in.
+class ReplayCollector {
+ public:
+  ReplayCollector() { clear(); }
+  void clear() {
+    active_=false;rideId_=0;sendId_=0;total_=0;have_=0;
+    for(size_t i=0;i<sizeof(seen_);++i) seen_[i]=0;
+  }
+  // Returns true when the packet belongs to a different transfer than the one
+  // being collected: save the current one first, then call clear() and add().
+  bool startsNewTransfer(const Replay& r) const { return active_ && r.sendId!=sendId_; }
+  bool add(const Replay& r) {
+    if(!active_){active_=true;rideId_=r.rideId;sendId_=r.sendId;total_=r.total;}
+    if(r.sendId!=sendId_||r.total!=total_||r.index>=total_) return false;
+    if(seen_[r.index>>3]&(1u<<(r.index&7))) return false;
+    seen_[r.index>>3]|=uint8_t(1u<<(r.index&7));
+    rms_[r.index]=r.rmsMg;peak_[r.index]=r.peak10Mg;impacts_[r.index]=r.impacts;
+    ++have_;return true;
+  }
+  bool active()const{return active_;}
+  bool complete()const{return active_&&have_==total_;}
+  uint32_t rideId()const{return rideId_;}
+  uint32_t sendId()const{return sendId_;}
+  uint16_t total()const{return total_;}
+  uint16_t received()const{return have_;}
+  uint16_t missing()const{return uint16_t(total_-have_);}
+  bool has(uint16_t i)const{return i<total_&&(seen_[i>>3]&(1u<<(i&7)));}
+  uint16_t rmsMg(uint16_t i)const{return rms_[i];}
+  uint8_t peak10Mg(uint16_t i)const{return peak_[i];}
+  uint8_t impacts(uint16_t i)const{return impacts_[i];}
+ private:
+  bool active_;uint32_t rideId_,sendId_;uint16_t total_,have_;
+  uint8_t seen_[(kMaxReplayBins+7)/8];
+  uint16_t rms_[kMaxReplayBins];
+  uint8_t peak_[kMaxReplayBins];
+  uint8_t impacts_[kMaxReplayBins];
 };
 } // namespace trailbridge

@@ -46,6 +46,16 @@ jobs:
             --build-path "${RUNNER_TEMP}/signal-os-build" \
             --verbose \
             experiments/signal-os/SIGNAL_OS
+      - name: Compile with the Trail Echo ESP-NOW bridge on (live + replay)
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli compile \
+            --fqbn esp32:esp32:m5stack_stickc_plus \
+            --warnings all \
+            --build-path "${RUNNER_TEMP}/signal-os-bridge-build" \
+            --build-property "build.extra_flags=-DSIGNAL_OS_TRAIL_BRIDGE_ENABLE=1" \
+            experiments/signal-os/SIGNAL_OS
       - name: Preserve linker maps for comparison
         if: always()
         shell: bash
