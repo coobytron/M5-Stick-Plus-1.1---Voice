@@ -36,6 +36,7 @@ public:
   }
   void end() {
 #if SIGNAL_OS_TRAIL_BRIDGE_ENABLE
+    replaying_=false;
     if(active_){esp_now_deinit();active_=false;WiFi.mode(WIFI_OFF);}
 #endif
   }
@@ -66,12 +67,55 @@ public:
     (void)data;(void)recording;(void)nowMs;
 #endif
   }
+  // Resend a ride that's already saved (B hold on the score screen), so a
+  // Cardputer that missed it live can still capture it. Two passes so a
+  // packet lost on the first usually arrives on the second. Paced, one
+  // packet per poll and at most one every 6 ms; never while recording.
+  template<class CoreT> bool startReplay(const CoreT& data, bool recording, uint32_t nowMs) {
+#if SIGNAL_OS_TRAIL_BRIDGE_ENABLE
+    if(!active_||recording||data.count()==0)return false;
+    replayTotal_=data.count();replayNext_=0;replayPass_=0;replayLastMs_=nowMs;
+    replaySendId_=esp_random()^nowMs;if(!replaySendId_)replaySendId_=1;
+    replaying_=true;
+    return true;
+#else
+    (void)data;(void)recording;(void)nowMs;
+    return false;
+#endif
+  }
+  void stopReplay(){replaying_=false;}
+  template<class CoreT> void pollReplay(const CoreT& data, uint32_t nowMs) {
+#if SIGNAL_OS_TRAIL_BRIDGE_ENABLE
+    if(!replaying_)return;
+    if(!active_||data.count()!=replayTotal_){replaying_=false;return;}
+    if(uint32_t(nowMs-replayLastMs_)<6)return;
+    replayLastMs_=nowMs;
+    const auto& bin=data.bin(replayNext_);
+    // rideId is only known for a ride recorded since this power-on.
+    Replay r={rideId_,replayNext_,replayTotal_,bin.rmsMg,bin.peak10Mg,bin.impactCount,replaySendId_};
+    uint8_t payload[kPacketSize];encodeReplay(r,payload);
+    static const uint8_t broadcast[6]={255,255,255,255,255,255};
+    if(esp_now_send(broadcast,payload,kPacketSize)!=ESP_OK){rejected_++;return;} // retry same bin next poll
+    submitted_++;
+    if(++replayNext_>=replayTotal_){replayNext_=0;if(++replayPass_>=2)replaying_=false;}
+#else
+    (void)data;(void)nowMs;
+#endif
+  }
+  bool replaying()const{return replaying_;}
+  // 0..100 across both passes.
+  uint8_t replayPercent()const{
+    if(!replayTotal_)return 0;
+    return uint8_t((uint32_t(replayPass_)*replayTotal_+replayNext_)*100u/(2u*replayTotal_));
+  }
   bool active()const{return active_;}
   uint32_t submitted()const{return submitted_;}
   uint32_t rejected()const{return rejected_;}
 private:
-  bool active_=false;
-  uint16_t lastBin_=0, nextSeq_=0;
+  bool active_=false, replaying_=false;
+  uint16_t lastBin_=0, nextSeq_=0, replayNext_=0, replayTotal_=0;
+  uint8_t replayPass_=0;
+  uint32_t replaySendId_=0, replayLastMs_=0;
   uint32_t rideId_=0,submitted_=0,rejected_=0;
 };
 } // namespace trailbridge
