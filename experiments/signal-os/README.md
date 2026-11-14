@@ -5,6 +5,8 @@ A small pocket-instrument interface with a graphite and acid-green palette.
 
 Designed for the original **M5StickC Plus / Plus 1.2 (135×240 portrait, 4 MB flash)** — not the Plus2.
 
+**All six apps, button controls and hardware requirements:** [SIGNAL OS App Guide](APP_GUIDE.md). For in-depth RF/IR setup use [Universal Remote](UNIVERSAL_REMOTE.md); for motion capture and Cardputer replay use [Trail Echo](TRAIL_ECHO.md).
+
 ## Included
 
 - **Bluetooth**: BLE Radar, named device list, inspector, RSSI history and Lost Alert.
