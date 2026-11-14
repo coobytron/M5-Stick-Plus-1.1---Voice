@@ -29,7 +29,7 @@ Designed for the original **M5StickC Plus / Plus 1.2 (135×240 portrait, 4 MB fl
 | Channel Atlas | Wi-Fi Radar | Display style | Home |
 | RF Atlas | RF Quiet Watch | Select 433 MHz band | Home |
 | RF Quiet Watch | RF Atlas | Arm / disarm activity watch | Home |
-| Trail Echo | Start / stop capture | Toggle score / stats after recording | Home |
+| Trail Echo | Start / stop capture | Toggle score / stats after recording | Home (B hold on score / stats: send the saved ride to the Cardputer) |
 | Sound Scope | Voice Recorder | Clear level | Home |
 | Voice Recorder | Sound Scope | Start / stop recording | Home |
 
@@ -89,6 +89,7 @@ This variant includes **TRAIL ECHO** as home item 8; the existing Bluetooth, Wi-
 - Home: B cycles to **8 TRAIL ECHO**; A opens.
 - Trail Echo: A starts or stops motion recording; after recording, B switches between waveform and statistics. A starts a new ride.
 - Hold A: returns home; any active recording stops and is saved first.
+- Hold B on the score or statistics page: sends the saved ride to a Cardputer running TrailEchoGPS (only when `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is `1`). The bottom line shows `SENDING n%`, then `SENT TWICE`; hold B again to stop (`SEND STOPPED`). See [Send a saved ride](TRAIL_ECHO.md#send-a-saved-ride-after-the-fact).
 - Trail Echo samples the on-board IMU at a target of 50 Hz and stores one aggregate bin per second.
 - If SPIFFS is unavailable, the mode works in RAM but indicates **RAM ONLY**.
 - During recording, an animated pulse and scrolling motion visualization run at brightness 112/255; normal brightness returns when recording stops.
@@ -102,7 +103,9 @@ In addition to Trail Echo's ride-vibration recorder, the project now tracks **Tr
 
 ## Cardputer ADV GPS Bridge (experimental)
 
-The optional GPS companion is in [`cardputer-adv/`](cardputer-adv/). Existing SIGNAL OS modes run unchanged unless `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is changed to `1` in `SIGNAL_OS.ino`. The Cardputer sketch logs GNSS to local microSD and receives ESP-NOW motion packets; visualizations export to GeoJSON and SVG. No SX1262 LoRa transmission or RF424 module is used for this bridge. **Arduino/device testing is pending**. See [Cardputer setup](cardputer-adv/README.md) and issue #13.
+The maintained Cardputer firmware is **TrailEchoGPS** in [cardputer-Synth](https://github.com/coobytron/cardputer-Synth/tree/main/TrailEchoGPS) (Launcher `.bin` on its releases; guide in its `docs/trail-echo-gps.md`). It logs live packets and also saves a ride the Stick resends with **B hold** as `/TrailEcho/Snn.CSV`, so a ride recorded while the Cardputer was off or out of range can still be put on the GPS route. The older candidate sketch in [`cardputer-adv/`](cardputer-adv/) does not receive resends.
+
+The original candidate sketch is in [`cardputer-adv/`](cardputer-adv/). Existing SIGNAL OS modes run unchanged unless `SIGNAL_OS_TRAIL_BRIDGE_ENABLE` is changed to `1` in `SIGNAL_OS.ino`. The Cardputer sketch logs GNSS to local microSD and receives ESP-NOW motion packets; visualizations export to GeoJSON and SVG. No SX1262 LoRa transmission or RF424 module is used for this bridge. **Arduino/device testing is pending**. See [Cardputer setup](cardputer-adv/README.md) and issue #13.
 
 ## ESP32 IRAM linker overflow: core-version diagnosis
 
