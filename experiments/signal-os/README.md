@@ -20,7 +20,8 @@ Designed for the original **M5StickC Plus / Plus 1.2 (135×240 portrait, 4 MB fl
 | Home | Open selected instrument | Next instrument | — |
 | Bluetooth Radar | Device list | All / named-only | Home |
 | Bluetooth List | Inspector | Next selected device | Home |
-| Inspector | Signal history | Next selected device | Home |
+| Inspector | BLE Proximity | Next selected device | Home |
+| BLE Proximity | RSSI history | Cycle near-signal threshold | Home |
 | Signal History | Lost-device alert | Next selected device | Home |
 | Lost-device alert | Radar | Arm / disarm selected device | Home |
 | Wi-Fi Radar | Networks | Include / exclude hidden networks | Home |
