@@ -32,6 +32,7 @@
 #endif
 #include "TrailBridgeRadio.h"
 #include <NimBLEDevice.h>
+#include "BLEProximityCore.h"
 #include <WiFi.h>
 #include <math.h>
 #include <string.h>
@@ -51,7 +52,7 @@ constexpr int AUDIO_BLOCK=512;
 constexpr float PI2=6.28318530718f;
 
 enum View : uint8_t { HOME, BLE_RADAR, BLE_LIST, BLE_INSPECT, BLE_HISTORY,
- BLE_ALERT, WIFI_RADAR, WIFI_LIST, WEATHER, CHANNEL_ATLAS, RF_ATLAS, RF_WATCH, SCOPE, RECORDER, TRAIL_ECHO };
+ BLE_ALERT, BLE_PROX, WIFI_RADAR, WIFI_LIST, WEATHER, CHANNEL_ATLAS, RF_ATLAS, RF_WATCH, SCOPE, RECORDER, TRAIL_ECHO };
 static View view=HOME;
 static uint8_t homeSelection=0, bleSelection=0, wifiPage=0;
 static bool namedOnly=false, showHidden=true, alarmEnabled=false, weatherDense=false;
@@ -60,6 +61,7 @@ static char watchAddress[18]={};
 static int16_t history[62]={};
 static int historyHead=0;
 static int historyCount=0;
+static bleprox::Monitor proximity;
 
 struct BleRecord { char addr[18]; char name[25]; int16_t rssi; uint32_t seen, id; bool used; };
 static BleRecord bleSlots[MAX_BLE]={}, bleList[MAX_BLE]={};
@@ -126,7 +128,8 @@ const char* viewName(View v) {
   switch(v) {
     case BLE_RADAR:return "BLE / RADAR"; case BLE_LIST:return "BLE / DEVICES";
     case BLE_INSPECT:return "BLE / INSPECT"; case BLE_HISTORY:return "BLE / HISTORY";
-    case BLE_ALERT:return "BLE / ALERT"; case WIFI_RADAR:return "WIFI / RADAR";
+    case BLE_ALERT:return "BLE / ALERT"; case BLE_PROX:return "BLE / PROXIMITY";
+    case WIFI_RADAR:return "WIFI / RADAR";
     case WIFI_LIST:return "WIFI / NETWORKS"; case WEATHER:return "INVISIBLE WEATHER";
     case CHANNEL_ATLAS:return "CHANNEL / ATLAS"; case RF_ATLAS:return "RF / ATLAS";
     case RF_WATCH:return "RF / QUIET WATCH";
@@ -164,7 +167,7 @@ class ScanCB : public NimBLEScanCallbacks {
   }
 } scanCB;
 
-bool isBle(View v) { return v>=BLE_RADAR && v<=BLE_ALERT; }
+bool isBle(View v) { return v>=BLE_RADAR && v<=BLE_PROX; }
 bool isWifi(View v) { return v>=WIFI_RADAR && v<=CHANNEL_ATLAS; }
 bool usesRf(View v) {
   return v==RF_ATLAS || v==RF_WATCH || v==WEATHER ||
@@ -193,6 +196,17 @@ void refreshBle() {
   portENTER_CRITICAL(&bleMux);
   memcpy(snapshot,bleSlots,sizeof(snapshot));
   portEXIT_CRITICAL(&bleMux);
+  // Read only a copied snapshot, never block the BLE scan callback.
+  // Pin the target address; RSSI sorting and named filters cannot swap it.
+  if(proximity.selected()) {
+    for(int i=0;i<MAX_BLE;++i) {
+      if(snapshot[i].used &&
+         strcmp(snapshot[i].addr,proximity.address())==0) {
+        proximity.observe(snapshot[i].addr,snapshot[i].rssi,snapshot[i].seen);
+        break;
+      }
+    }
+  }
   bleCount=0; uint32_t now=millis();
   for(int i=0;i<MAX_BLE;++i) {
     if(!snapshot[i].used || now-snapshot[i].seen>BLE_KEEP_MS)continue;
@@ -332,6 +346,11 @@ void enter(View next) {
   if(isBle(prev) && !isBle(next))stopBle();
   if(isWifi(prev) && !isWifi(next))stopWifi();
   if(isAudio(prev) && !isAudio(next))audioMicOff();
+  if(next==BLE_PROX) {
+    const auto *candidate=selectedBle();
+    proximity.select(candidate?candidate->addr:nullptr,
+                     candidate?candidate->name:nullptr,millis());
+  }
   view=next;
   if(isBle(next)&&!isBle(prev))startBle();
   if(isWifi(next)&&!isWifi(prev))startWifi();
@@ -429,8 +448,64 @@ void drawBleInspect() {
   canvas.fillRect(9,140,116,5,RING);canvas.fillRect(9,140,width,5,signalColor(d->rssi));
   txt(9,158,"LAST SEEN",MUTED);rightTxt(126,158,String((millis()-d->seen)/1000)+"s",UI_WHITE);
   txt(9,176,"ADDR",MUTED);txt(9,188,String(d->addr),MUTED);
-  footer("A HISTORY","B NEXT");
+  footer("A PROX","B NEXT");
 }
+// RSSI-based proximity estimate. NEVER display fabricated distance/meters.
+void drawBleProximity() {
+  const uint32_t now=millis();
+  const bleprox::State st=proximity.state(now);
+  header(proximity.selected()?"LOCKED":"NO TARGET");
+  if(!proximity.selected()) {
+    txt(8,69,"NO BLE TARGET",UI_ORANGE);
+    txt(8,99,"CHOOSE A DEVICE",UI_WHITE);
+    txt(8,117,"FROM BLE LIST",MUTED);
+    footer("A HISTORY","B LIMIT");
+    return;
+  }
+  txt(8,59,safeName(proximity.name(),17),UI_WHITE);
+  rightTxt(127,74,String(proximity.address()+9),MUTED);
+  const bool fresh=proximity.fresh(now);
+  const char *stateLabel="SEARCHING";
+  uint16_t accent=MUTED;
+  switch(st) {
+    case bleprox::State::Near:stateLabel="NEAR / STRONG";accent=LIME;break;
+    case bleprox::State::Mid:stateLabel="MID / SIGNAL";accent=AMBER;break;
+    case bleprox::State::Far:stateLabel="FAR / WEAK";accent=UI_ORANGE;break;
+    case bleprox::State::Stale:stateLabel="SIGNAL STALE";accent=AMBER;break;
+    case bleprox::State::Missing:stateLabel="SIGNAL MISSING";accent=UI_ORANGE;break;
+    default:break;
+  }
+  txt(8,86,stateLabel,accent);
+  const int cx=67,cy=140;
+  canvas.drawCircle(cx,cy,43,RING);
+  canvas.drawCircle(cx,cy,32,RULE);
+  if(fresh) {
+    const int p=int((now/220u)%6u);
+    canvas.drawCircle(cx,cy,19+4*p,dim(accent,uint8_t(190-25*p)));
+    canvas.fillCircle(112,107,3+int((now/440u)%2u),accent);
+    txt(22,127,String(proximity.rssi()),UI_WHITE,3);
+    txt(94,148,"dBm",MUTED);
+  } else {
+    txt(34,127,st==bleprox::State::Searching?"--":"...",MUTED,3);
+    if(st!=bleprox::State::Searching)
+      txt(37,161,String(proximity.ageMs(now)/1000u)+"s old",MUTED);
+  }
+  txt(8,180,"RSSI HISTORY",MUTED);
+  rightTxt(127,180,String(proximity.threshold())+"dBm",LIME);
+  canvas.drawFastHLine(8,208,119,RING);
+  int lastX=-1,lastY=0;
+  for(uint8_t i=0;i<proximity.points();++i) {
+    const int16_t r=proximity.point(i);
+    if(r==bleprox::kNoValue) {lastX=-1;continue;}
+    const int x=8+2*int(i);
+    const int y=constrain((int)map(r,-110,-40,207,185),185,207);
+    if(lastX>=0)canvas.drawLine(lastX,lastY,x,y,LIME);
+    else canvas.fillCircle(x,y,1,LIME);
+    lastX=x;lastY=y;
+  }
+  footer("A HISTORY","B LIMIT");
+}
+
 void drawBleHistory() {
   const auto *d=selectedBle();header(d?String(d->rssi)+"dBm":"NO DATA");
   txt(8,61,d?safeName(d->name,18):"SELECT A DEVICE",UI_WHITE);
@@ -733,6 +808,7 @@ void draw() {
     case BLE_INSPECT:drawBleInspect();break;
     case BLE_HISTORY:drawBleHistory();break;
     case BLE_ALERT:drawBleAlert();break;
+    case BLE_PROX:drawBleProximity();break;
     case WIFI_RADAR:drawWifiRadar();break;
     case WIFI_LIST:drawWifiList();break;
     case WEATHER:drawWeather();break;
@@ -751,7 +827,10 @@ void onA() {
     static const View choices[]={BLE_RADAR,WIFI_RADAR,CHANNEL_ATLAS,WEATHER,RF_ATLAS,SCOPE,RECORDER,TRAIL_ECHO};
     enter(choices[homeSelection]);
   } else if(isBle(view)) {
-    enter(view==BLE_ALERT?BLE_RADAR:(View)((int)view+1));
+    if(view==BLE_INSPECT)enter(BLE_PROX);
+    else if(view==BLE_PROX)enter(BLE_HISTORY);
+    else if(view==BLE_ALERT)enter(BLE_RADAR);
+    else enter((View)((int)view+1));
   } else if(view==WIFI_RADAR)enter(WIFI_LIST);
   else if(view==WIFI_LIST)enter(WIFI_RADAR);
   else if(view==CHANNEL_ATLAS)enter(WIFI_RADAR);
@@ -774,6 +853,7 @@ void onA() {
 void onB() {
   if(view==HOME)homeSelection=(homeSelection+1)%HOME_ITEMS;
   else if(view==BLE_RADAR)namedOnly=!namedOnly;
+  else if(view==BLE_PROX)proximity.cycleThreshold();
   else if(view==BLE_LIST || view==BLE_INSPECT || view==BLE_HISTORY) {
     if(bleCount)bleSelection=(bleSelection+1)%bleCount;
     historyCount=0;historyHead=0;
@@ -883,6 +963,7 @@ void loop() {
       rfQuietWatch.feed(rfSampler.lastRssi(),now);
   }
   if(isBle(view)) {refreshBle();tickHistory();checkAlarm();}
+  if(view==BLE_PROX)proximity.tick(now);
   if(view==SCOPE && now-lastFrame>=FRAME_MS)pollAudioScope();
   if(now-lastFrame>=FRAME_MS) {lastFrame=now;draw();}
   delay(3);

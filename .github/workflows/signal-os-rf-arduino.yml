@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - 'feature/trail-echo-live-record-ui'
+      - 'feature/signal-os-ble-proximity'
     paths:
       - 'experiments/signal-os/SIGNAL_OS/**'
       - '.github/workflows/signal-os-rf-arduino.yml'

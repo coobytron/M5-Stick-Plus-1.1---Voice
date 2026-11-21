@@ -20,7 +20,8 @@ Designed for the original **M5StickC Plus / Plus 1.2 (135×240 portrait, 4 MB fl
 | Home | Open selected instrument | Next instrument | — |
 | Bluetooth Radar | Device list | All / named-only | Home |
 | Bluetooth List | Inspector | Next selected device | Home |
-| Inspector | Signal history | Next selected device | Home |
+| Inspector | BLE Proximity | Next selected device | Home |
+| BLE Proximity | RSSI history | Cycle near-signal threshold | Home |
 | Signal History | Lost-device alert | Next selected device | Home |
 | Lost-device alert | Radar | Arm / disarm selected device | Home |
 | Wi-Fi Radar | Networks | Include / exclude hidden networks | Home |
@@ -134,3 +135,15 @@ SIGNAL OS includes **two new home instruments**: RF Atlas and Channel Atlas. RF 
 Portable host regression: `g++ -std=c++11 -Wall -Wextra -Werror -pedantic tests/test_rf_model.cpp -o /tmp/signal_rf_model && /tmp/signal_rf_model`. Run previous Trail Echo, Trail Link and GPS packet host tests unchanged. **The exact physical RF module and Arduino toolchain must still be tested.**
 
 **RadioLib compatibility:** install exactly **RadioLib 7.8.1** for the opt-in CC1101 receiver. RadioLib **8.0.0** (released November 7, 2026) changed `CC1101::begin` and frequency API types; the header intentionally rejects 8.x until its adapter is ported. With the RF flag left at `0`, RadioLib is not required.
+
+## BLE Proximity Monitor
+
+**Hardware:** original **M5StickC Plus 1.x**, using its built-in BLE scanner. **No RF424 accessory** or phone/Mac app is required. The existing BLE Radar, list, inspector, 62-bin history and BLE Lost Alert remain in place.
+
+**Navigation:** from Home select **Bluetooth** → press **A** for Device List → press **B** to pick an advertising device → press **A** for Inspector → press **A** for **Proximity**. While in Proximity, **B** cycles the qualitative **near-signal threshold** (-55/-65/-75 dBm), **A** continues to RSSI History and the existing Lost Alert, and **hold A** goes home. The default near threshold is **-65 dBm**.
+
+**Visualization:** address-pinned BLE advertisement tracker (not sorted-list index), current smoothed RSSI, animated rings, and 60 graph points at 400 ms intervals (up to 24 seconds). The display classifies **NEAR / MID / FAR** as *relative signal strength only*. After **3.5 seconds** without a new advertisement, it shows **SIGNAL STALE**, then **SIGNAL MISSING** after **12 seconds**. The graph contains explicit gaps for missing/stale data; it does not invent RSSI measurements. If the chosen address rotates or stops advertising, the original address cannot be followed.
+
+**Important:** no real distance in meters, direction, or reliable transmitter identity can be inferred from these measurements. RSSI varies with the environment, antennas, reflection, body blocking and advertising intervals. Android/iOS devices may stop broadcasting detectable advertisements or rotate private addresses. This is an exploratory monitor, **not a person tracker, theft alarm, or safety system**. No BLE histories are transmitted to a server or saved to flash.
+
+**Checks:** `g++ -std=c++11 -Wall -Wextra -Werror -pedantic tests/test_ble_proximity.cpp -o /tmp/test_ble_proximity && /tmp/test_ble_proximity`. Arduino CI compiles on **esp32:esp32:m5stack_stickc_plus** with both RF424 flag states; board-flashing / moving-device measurements remain to be physically verified.
