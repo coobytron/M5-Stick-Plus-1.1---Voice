@@ -1,8 +1,7 @@
 /*
- SIGNAL OS v3.1 + TRAIL ECHO / M5StickC Plus 1.x (135 x 240 portrait)
+ SIGNAL OS v3.2 + UNIVERSAL REMOTE / M5StickC Plus 1.x (135 x 240 portrait)
  BLE Radar / Device List / Inspector / History / Lost Alert
- Wi-Fi Radar / Network List / Invisible Weather
- Audio Scope / USB Voice Recorder / Trail Echo IMU Recorder
+ Wi-Fi Radar / Network List / RF Atlas / Trail Echo / Universal Remote
 
  Arduino libraries: M5Unified, M5GFX, NimBLE-Arduino 2.5.1
  Espressif Arduino-ESP32 core (same settings as Precision Sonar v2).
@@ -13,18 +12,19 @@
 
  NOTE: Device angles are deterministic artistic placements, NOT bearings.
  Wi-Fi scans show access points, NOT network traffic or occupancy.
- USB recorder requires included record_on_mac.py running on Mac.
+ IR TX uses GPIO9 on Plus 1.x; IR learn uses Flipper .ir files over USB.
 */
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <M5GFX.h>
 #include "SignalOS_TrailEcho.h"
-// Optional 433-MHz CC1101 RX (RF424 switch must be on 433 MHz).
-// Default OFF: preserves the user's confirmed 1.x build and avoids RadioLib.
+// 433-MHz RF424 CC1101, enabled for Universal Remote capture and TX.
+// For IR-only, set flag to 0. RadioLib 7.8.1 is required when enabled.
 #ifndef SIGNAL_OS_RF424_CC1101
-#define SIGNAL_OS_RF424_CC1101 0
+#define SIGNAL_OS_RF424_CC1101 1
 #endif
 #include "SignalOS_RF424.h"
+#include "SignalOS_UniversalRemote.h"
 // Set to 1 only after Cardputer ESP-NOW RX validation; otherwise no behavior change.
 // (CI also compiles it with -DSIGNAL_OS_TRAIL_BRIDGE_ENABLE=1.)
 #ifndef SIGNAL_OS_TRAIL_BRIDGE_ENABLE
@@ -36,25 +36,22 @@
 #include <math.h>
 #include <string.h>
 #include <string>
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
 
 constexpr int WIDTH=135, HEIGHT=240;
 constexpr int MAX_BLE=32, MAX_WIFI=24;
 constexpr int BLE_ROWS=7, WIFI_ROWS=8;
 constexpr uint32_t BLE_KEEP_MS=17000;
 constexpr uint32_t FRAME_MS=70;
-constexpr uint32_t AUDIO_RATE=16000;
-constexpr uint8_t HOME_ITEMS=8;
+constexpr uint8_t HOME_ITEMS=6;
 constexpr uint8_t STANDARD_BRIGHTNESS=88, TRAIL_REC_BRIGHTNESS=112;
-constexpr int AUDIO_BLOCK=512;
 constexpr float PI2=6.28318530718f;
 
 enum View : uint8_t { HOME, BLE_RADAR, BLE_LIST, BLE_INSPECT, BLE_HISTORY,
- BLE_ALERT, WIFI_RADAR, WIFI_LIST, WEATHER, CHANNEL_ATLAS, RF_ATLAS, RF_WATCH, SCOPE, RECORDER, TRAIL_ECHO };
+ BLE_ALERT, WIFI_RADAR, WIFI_LIST, CHANNEL_ATLAS, RF_ATLAS, RF_WATCH, TRAIL_ECHO,
+ REMOTE_LIST, REMOTE_CAPTURE, REMOTE_DETAIL };
 static View view=HOME;
-static uint8_t homeSelection=0, bleSelection=0, wifiPage=0;
-static bool namedOnly=false, showHidden=true, alarmEnabled=false, weatherDense=false;
+static uint8_t homeSelection=0, bleSelection=0, wifiPage=0, remoteSelection=0;
+static bool namedOnly=false, showHidden=true, alarmEnabled=false;
 static uint32_t lastFrame=0, lastHistory=0, lastWifiPoll=0, lastAlarm=0;
 static char watchAddress[18]={};
 static int16_t history[62]={};
@@ -82,21 +79,12 @@ static trailbridge::Sender trailGpsLink;
 static bool trailImuReady=false;
 static signalrf::Sampler rfSampler;
 static signalrf::QuietWatch rfQuietWatch;
+static signalremote::Engine universalRemote;
+static String remoteLine;
 static uint8_t rfWatchBand=4;
 static bool atlasContrast=false;
 static uint16_t trailLiveHistory[119]={};
 static uint8_t trailLiveHead=0;
-
-// Audio is transmitted as binary packets (SREC, D, E) at 921600 baud.
-// Two pending mic buffers, callback->queue, main loop->serial, requeue.
-static QueueHandle_t audioDone=nullptr;
-static int16_t audioBuffers[2][AUDIO_BLOCK];
-static bool recording=false, hostReady=false, micReady=false;
-static uint32_t recordedBytes=0, startedAt=0, lastHello=0;
-static int soundLevel=0;
-static int16_t scopeSamples[115]={};
-static char hostCommand[16]={};
-static uint8_t commandLength=0;
 
 uint32_t hashText(const char* s) {
   uint32_t h=2166136261UL;
@@ -127,11 +115,13 @@ const char* viewName(View v) {
     case BLE_RADAR:return "BLE / RADAR"; case BLE_LIST:return "BLE / DEVICES";
     case BLE_INSPECT:return "BLE / INSPECT"; case BLE_HISTORY:return "BLE / HISTORY";
     case BLE_ALERT:return "BLE / ALERT"; case WIFI_RADAR:return "WIFI / RADAR";
-    case WIFI_LIST:return "WIFI / NETWORKS"; case WEATHER:return "INVISIBLE WEATHER";
+    case WIFI_LIST:return "WIFI / NETWORKS";
     case CHANNEL_ATLAS:return "CHANNEL / ATLAS"; case RF_ATLAS:return "RF / ATLAS";
     case RF_WATCH:return "RF / QUIET WATCH";
-    case SCOPE:return "AUDIO / SCOPE"; case RECORDER:return "AUDIO / RECORD";
     case TRAIL_ECHO:return "TRAIL / ECHO";
+    case REMOTE_LIST:return "REMOTE / LIBRARY";
+    case REMOTE_CAPTURE:return "REMOTE / LEARN RF";
+    case REMOTE_DETAIL:return "REMOTE / SEND";
     default:return "INSTRUMENTS";
   }
 }
@@ -167,10 +157,9 @@ class ScanCB : public NimBLEScanCallbacks {
 bool isBle(View v) { return v>=BLE_RADAR && v<=BLE_ALERT; }
 bool isWifi(View v) { return v>=WIFI_RADAR && v<=CHANNEL_ATLAS; }
 bool usesRf(View v) {
-  return v==RF_ATLAS || v==RF_WATCH || v==WEATHER ||
-         v==CHANNEL_ATLAS || v==TRAIL_ECHO;
+  return v==RF_ATLAS || v==RF_WATCH || v==CHANNEL_ATLAS || v==TRAIL_ECHO;
 }
-bool isAudio(View v) { return v==SCOPE || v==RECORDER; }
+bool isRemote(View v) { return v==REMOTE_LIST || v==REMOTE_CAPTURE || v==REMOTE_DETAIL; }
 void startBle() {
   if(!bleInit) {
     NimBLEDevice::init("SIGNAL-OS");
@@ -250,80 +239,9 @@ void pollWifi() {
   }
 }
 
-void audioCallback(void*,void* data,size_t length) {
-  if(!audioDone)return;
-  uint8_t idx=(data==audioBuffers[0])?0:1;
-  xQueueSend(audioDone,&idx,0);
-}
-void audioMicOn() {
-  M5.Speaker.end();
-  if(!micReady) micReady=M5.Mic.begin();
-}
-void audioMicOff() {
-  if(micReady) {
-    M5.Mic.end();micReady=false;
-  }
-}
-void streamBegin() {
-  if(recording || !hostReady)return;
-  audioMicOff();
-  if(!audioDone)audioDone=xQueueCreate(6,sizeof(uint8_t));
-  if(!audioDone)return;
-  xQueueReset(audioDone);
-  M5.Mic.setBufferReleaseCallback(nullptr,audioCallback);
-  audioMicOn();
-  if(!micReady)return;
-  Serial.write((const uint8_t*)"SREC",4);
-  uint32_t sampleRate=AUDIO_RATE;
-  Serial.write((const uint8_t*)&sampleRate,4);
-  recordedBytes=0;startedAt=millis();recording=true;
-  M5.Mic.record(audioBuffers[0],AUDIO_BLOCK,AUDIO_RATE);
-  M5.Mic.record(audioBuffers[1],AUDIO_BLOCK,AUDIO_RATE);
-}
-void streamPump() {
-  if(!recording)return;
-  uint8_t index=0;int budget=4;
-  while(budget-- && xQueueReceive(audioDone,&index,0)==pdTRUE) {
-    const uint8_t frame='D';uint16_t size=sizeof(audioBuffers[0]);
-    Serial.write(&frame,1);
-    Serial.write((const uint8_t*)&size,2);
-    Serial.write((const uint8_t*)audioBuffers[index],size);
-    recordedBytes+=size;
-    long sum=0;
-    for(int i=0;i<AUDIO_BLOCK;i+=8)sum+=abs((int32_t)audioBuffers[index][i]);
-    soundLevel=(int)min(100L,sum/700);
-    M5.Mic.record(audioBuffers[index],AUDIO_BLOCK,AUDIO_RATE);
-  }
-}
-void streamStop() {
-  if(!recording)return;
-  // No longer submit more blocks; pending audio is dropped at stop.
-  recording=false;
-  audioMicOff();
-  M5.Mic.setBufferReleaseCallback(nullptr,nullptr);
-  const uint8_t end='E';
-  Serial.write(&end,1);
-  Serial.write((const uint8_t*)&recordedBytes,4);
-  Serial.flush();
-}
-void pollHost() {
-  while(Serial.available()) {
-    char c=(char)Serial.read();
-    if(c=='\n'||c=='\r') {
-      hostCommand[commandLength]='\0';
-      if(strcmp(hostCommand,"HELLO")==0) {hostReady=true;lastHello=millis();}
-      commandLength=0;
-    } else if(commandLength<sizeof(hostCommand)-1 && c>=32 && c<=126) {
-      hostCommand[commandLength++]=c;
-    } else {commandLength=0;}
-  }
-  if(millis()-lastHello>5000)hostReady=false;
-}
-
 void enter(View next) {
   if(next==view)return;
   View prev=view;
-  if(recording && next!=RECORDER)streamStop();
   if(prev==TRAIL_ECHO && next!=TRAIL_ECHO) {
     trailEcho.exit(millis());
     trailGpsLink.end();
@@ -331,19 +249,21 @@ void enter(View next) {
   }
   if(isBle(prev) && !isBle(next))stopBle();
   if(isWifi(prev) && !isWifi(next))stopWifi();
-  if(isAudio(prev) && !isAudio(next))audioMicOff();
+  if(prev==REMOTE_CAPTURE && next!=REMOTE_CAPTURE)universalRemote.stopCapture();
+  if(isRemote(prev) && !isRemote(next))universalRemote.close(rfSampler);
   view=next;
   if(isBle(next)&&!isBle(prev))startBle();
   if(isWifi(next)&&!isWifi(prev))startWifi();
-  if(next==SCOPE)audioMicOn();
   if(next==TRAIL_ECHO) {trailEcho.enter();trailGpsLink.begin();}
+  if(isRemote(next) && !isRemote(prev))universalRemote.open(rfSampler);
+  if(next==REMOTE_CAPTURE)universalRemote.startCapture();
   if(usesRf(next))rfSampler.ensure(millis());
   lastFrame=0;
 }
 
 void header(const String& info) {
   txt(8,8,"SIGNAL",UI_WHITE,2);
-  canvas.fillCircle(123,14,3,view==RECORDER&&recording?UI_RED:LIME);
+  canvas.fillCircle(123,14,3,LIME);
   canvas.drawFastHLine(8,30,119,RULE);
   txt(8,39,viewName(view),MUTED);
   rightTxt(127,39,info,LIME);
@@ -376,11 +296,11 @@ void rings(int cx,int cy,int r) {
   canvas.fillCircle(cx,cy,3,UI_WHITE);
 }
 void drawHome() {
-  header("V3.1 / RF LAB");
-  const char* names[]={"BLUETOOTH","WI-FI RADAR","CHANNEL ATLAS","INVISIBLE WX",
-                       "RF ATLAS","SOUND SCOPE","VOICE REC","TRAIL ECHO"};
-  const char* subtitles[]={"BLE FIELD","2.4 GHz NETWORKS","CHANNEL ACTIVITY","WIRELESS PATTERNS",
-                           "433 MHz SURVEY","MICROPHONE","USB TO MAC","TERRAIN / MOTION"};
+  header("V3.2 / RF+IR");
+  const char* names[]={"BLUETOOTH","WI-FI RADAR","CHANNEL ATLAS","RF ATLAS",
+                        "TRAIL ECHO","UNIVERSAL"};
+  const char* subtitles[]={"BLE FIELD","2.4 GHz NETWORKS","CHANNEL ACTIVITY",
+                            "433 MHz SURVEY","TERRAIN / MOTION","RF + IR REMOTES"};
   for(int i=0;i<HOME_ITEMS;++i) {
     int y=46+i*21;
     if(i==homeSelection) {canvas.fillRoundRect(6,y-1,123,21,3,PANEL);canvas.fillRect(6,y-1,2,21,LIME);}
@@ -487,32 +407,6 @@ void drawWifiList() {
   }
   footer("A RADAR","B PAGE");
 }
-void drawWeather() {
-  header(String(wifiCount)+" AP");
-  txt(8,59,"RADIO FIELD",UI_WHITE,2);
-  txt(8,80,rfSampler.ready()?"WIFI + 433 MHz":"2.4 GHz / AMBIENT",MUTED);
-  uint32_t t=millis();
-  // Not traffic monitoring: animated signal-field metaphor from observed AP RSSI.
-  for(int j=0;j<16;++j){
-    int x=7+j*8;
-    int ch=1+j%11;
-    float strength=constrain(channelStrength[ch]/70.0f,0.0f,4.0f);
-    if(rfSampler.ready() && (j%4==0))
-      strength+=signalrf::strength(rfSampler.at(uint8_t(j%signalrf::kBands)))/70.0f;
-    for(int y=102;y<188;y+=5) {
-      float wiggle=sinf((float)y*.06f + j*.53f + t*.0011f*(weatherDense?2.4f:1.0f));
-      int xx=x+(int)(wiggle*(2.5f+strength));
-      int yy=y+(int)(cosf(t*.0007f+j*.4f)*3);
-      uint16_t c=dim((j%4==0)?AMBER:LIME,(uint8_t)(65+min(135.0f,strength*27+y%31)));
-      canvas.drawPixel(xx,yy,c);
-    }
-  }
-  canvas.drawFastHLine(8,194,119,RULE);
-  txt(8,203,weatherDense?"FIELD / ENERGIZED":"FIELD / CALM",MUTED);
-  if(rfSampler.ready())rightTxt(127,203,String(rfSampler.peak())+" dBm",UI_ORANGE);
-  footer("A HOME (HOLD)","B STYLE");
-}
-
 // CHANNEL ATLAS keeps the existing Wi-Fi AP strengths (not packet occupancy).
 // A second, CC1101-only row shows received 433 MHz energy if RF is enabled.
 void drawChannelAtlas() {
@@ -576,41 +470,53 @@ void drawRfWatch() {
   footer("A ATLAS","B ARM/OFF");
 }
 
-void drawScope() {
-  header(micReady?"MIC ON":"MIC OFF");
-  txt(8,60,"SOUND FIELD",UI_WHITE,2);
-  canvas.drawFastHLine(8,137,119,RING);
-  for(int i=0;i<114;++i) {
-    int y1=constrain(137-(scopeSamples[i]>>9),88,181);
-    int y2=constrain(137-(scopeSamples[i+1]>>9),88,181);
-    canvas.drawLine(9+i,y1,10+i,y2,i%9==0?UI_WHITE:LIME);
+void drawRemoteList() {
+  header(String(universalRemote.library.size())+" SAVED");
+  txt(8,60,"UNIVERSAL REMOTE",UI_WHITE);
+  txt(8,75,"433 MHz + INFRARED",MUTED);
+  const uint8_t maxIdx=universalRemote.library.size();
+  if(remoteSelection>maxIdx)remoteSelection=maxIdx;
+  const int first=remoteSelection>=6?remoteSelection-5:0;
+  for(int row=0;row<7 && first+row<=maxIdx;row++){
+    const int index=first+row,y=91+row*18;
+    const bool selected=index==remoteSelection;
+    if(selected) {canvas.fillRoundRect(7,y-2,121,17,3,PANEL);canvas.fillRect(7,y-2,2,17,LIME);}
+    if(index==0){txt(14,y,"+ LEARN 433 RF",selected?LIME:UI_WHITE);}
+    else {
+      const auto* c=universalRemote.library.at(index-1);
+      if(!c)continue;
+      txt(14,y,safeName(c->name,14),selected?LIME:UI_WHITE);
+      rightTxt(126,y,c->kind==signalremote::RF_RAW?"RF":"IR",c->kind==signalremote::RF_RAW?AMBER:MUTED);
+    }
   }
-  canvas.drawFastHLine(8,183,119,RULE);
-  txt(8,195,"INPUT LEVEL",MUTED);
-  rightTxt(127,195,String(soundLevel)+"%",UI_WHITE);
-  footer("A RECORDER","B GAIN");
+  footer("A OPEN","B NEXT");
 }
-void drawRecorder() {
-  header(recording?"REC":"USB");
-  txt(8,61,"VOICE NOTES",UI_WHITE,2);
-  if(recording) {
-    canvas.fillCircle(22,104,8,UI_RED);
-    txt(37,94,"RECORDING",UI_RED);
-    uint32_t seconds=(millis()-startedAt)/1000;
-    txt(8,127,String(seconds/60)+":"+String((seconds%60)/10)+String(seconds%10),UI_WHITE,3);
-  } else {
-    canvas.drawCircle(22,105,8,hostReady?LIME:MUTED);
-    txt(37,98,hostReady?"HOST READY":"NO RECEIVER",hostReady?LIME:UI_ORANGE);
-    txt(8,139,hostReady?"PRESS B TO RECORD":"RUN MAC SCRIPT",MUTED);
+void drawRemoteCapture() {
+  header(universalRemote.rfReady()?"CC1101 / RX":"RF OFF");
+  txt(8,61,"LEARN / 433.92",UI_WHITE,2);
+  txt(8,97,"PRESS REMOTE BUTTON",MUTED);
+  txt(8,117,universalRemote.status(),universalRemote.capturing()?LIME:UI_ORANGE);
+  txt(8,155,"FIXED-CODE OOK / ASK",MUTED);
+  txt(8,171,"NO ROLLING CODES",MUTED);
+  txt(8,188,"AUTO-SAVES WHEN SEEN",UI_WHITE);
+  footer("A RETRY","B BACK");
+}
+void drawRemoteDetail() {
+  const auto* c=remoteSelection?universalRemote.library.at(remoteSelection-1):nullptr;
+  if(!c){drawRemoteList();return;}
+  header(c->kind==signalremote::RF_RAW?"RF / 433":"IR / LED");
+  txt(8,64,safeName(c->name,10),UI_WHITE,2);
+  txt(8,93,c->kind==signalremote::RF_RAW?"433.920 MHz":"INFRARED",AMBER);
+  txt(8,112,String(c->count)+" PULSES",MUTED);
+  const int x0=9,y0=170;
+  for(int i=0;i<119;i++){
+    const uint16_t j=uint16_t(i)*c->count/119;
+    const int h=4+min(40,int(c->pulses[j]/150));
+    canvas.drawFastVLine(x0+i,y0-h,h,(j%2)?dim(LIME,90):LIME);
   }
-  for(int i=0;i<19;++i) {
-    int h=recording?constrain(3+soundLevel/6+(int)(5*fabsf(sinf(i*.7f+millis()*.003f))),3,24):3;
-    canvas.fillRect(10+i*6,180-h,3,h,recording?(i%5==0?UI_WHITE:LIME):RING);
-  }
-  canvas.drawFastHLine(8,185,119,RULE);
-  txt(8,195,"16K / MONO / PCM",MUTED);
-  rightTxt(127,208,recording?String(recordedBytes/1024)+" KB":"USB-C",UI_WHITE);
-  footer("HOLD A HOME",recording?"B STOP":"B START");
+  txt(8,187,universalRemote.status(),MUTED);
+  txt(8,205,"ONLY YOUR OWN DEVICES",MUTED);
+  footer("A TRANSMIT","B BACK");
 }
 // B hold on a saved ride resends it to the Cardputer. Covers the bottom
 // line of the score/stats page while it's relevant.
@@ -735,20 +641,20 @@ void draw() {
     case BLE_ALERT:drawBleAlert();break;
     case WIFI_RADAR:drawWifiRadar();break;
     case WIFI_LIST:drawWifiList();break;
-    case WEATHER:drawWeather();break;
     case CHANNEL_ATLAS:drawChannelAtlas();break;
     case RF_ATLAS:drawRfAtlas();break;
     case RF_WATCH:drawRfWatch();break;
-    case SCOPE:drawScope();break;
-    case RECORDER:drawRecorder();break;
     case TRAIL_ECHO:drawTrailEcho();break;
+    case REMOTE_LIST:drawRemoteList();break;
+    case REMOTE_CAPTURE:drawRemoteCapture();break;
+    case REMOTE_DETAIL:drawRemoteDetail();break;
   }
   canvas.pushSprite(0,0);
 }
 
 void onA() {
   if(view==HOME) {
-    static const View choices[]={BLE_RADAR,WIFI_RADAR,CHANNEL_ATLAS,WEATHER,RF_ATLAS,SCOPE,RECORDER,TRAIL_ECHO};
+    static const View choices[]={BLE_RADAR,WIFI_RADAR,CHANNEL_ATLAS,RF_ATLAS,TRAIL_ECHO,REMOTE_LIST};
     enter(choices[homeSelection]);
   } else if(isBle(view)) {
     enter(view==BLE_ALERT?BLE_RADAR:(View)((int)view+1));
@@ -757,8 +663,12 @@ void onA() {
   else if(view==CHANNEL_ATLAS)enter(WIFI_RADAR);
   else if(view==RF_ATLAS)enter(RF_WATCH);
   else if(view==RF_WATCH)enter(RF_ATLAS);
-  else if(view==SCOPE)enter(RECORDER);
-  else if(view==RECORDER)enter(SCOPE);
+  else if(view==REMOTE_LIST) {
+    if(remoteSelection==0)enter(REMOTE_CAPTURE);
+    else enter(REMOTE_DETAIL);
+  }
+  else if(view==REMOTE_CAPTURE)universalRemote.startCapture();
+  else if(view==REMOTE_DETAIL && remoteSelection>0)universalRemote.send(remoteSelection-1,rfSampler);
   else if(view==TRAIL_ECHO && trailImuReady) {
     trailGpsLink.stopReplay();
     const bool wasRecording=trailEcho.recording();
@@ -787,9 +697,8 @@ void onB() {
   else if(view==CHANNEL_ATLAS)atlasContrast=!atlasContrast;
   else if(view==RF_ATLAS) {rfWatchBand=uint8_t((rfWatchBand+1u)%signalrf::kBands);rfQuietWatch.arm(false,millis());}
   else if(view==RF_WATCH)rfQuietWatch.arm(!rfQuietWatch.armed(),millis());
-  else if(view==WEATHER)weatherDense=!weatherDense;
-  else if(view==SCOPE)soundLevel=0;
-  else if(view==RECORDER){if(recording)streamStop();else streamBegin();}
+  else if(view==REMOTE_LIST)remoteSelection=uint8_t((remoteSelection+1)%(universalRemote.library.size()+1));
+  else if(view==REMOTE_CAPTURE || view==REMOTE_DETAIL)enter(REMOTE_LIST);
   else if(view==TRAIL_ECHO){trailGpsLink.stopReplay();trailEcho.shortB();}
 }
 // B hold: send the saved ride to a listening Cardputer (TrailEchoGPS).
@@ -799,17 +708,6 @@ void onBHold() {
   else if(trailGpsLink.startReplay(trailEcho.data(),trailEcho.recording(),millis())) trailSendNotice="SENT TWICE";
   else trailSendNotice=trailGpsLink.active()?"NOTHING TO SEND":"BRIDGE OFF";
   trailSendNoticeUntil=millis()+4000;
-}
-void pollAudioScope() {
-  if(view!=SCOPE || !micReady)return;
-  static int16_t buff[256];
-  if(!M5.Mic.record(buff,256,AUDIO_RATE))return;
-  uint32_t start=millis();
-  while(M5.Mic.isRecording() && millis()-start<30)delay(1);
-  long sum=0;for(int i=0;i<256;i+=4)sum+=abs((int32_t)buff[i]);
-  int val=(int)min(100L,sum/650);
-  soundLevel=(soundLevel*3+val)/4;
-  for(int i=0;i<115;++i)scopeSamples[i]=buff[i*2];
 }
 void tickHistory() {
   if(!isBle(view)||millis()-lastHistory<600)return;
@@ -840,13 +738,37 @@ static bool readTrailAccel(float& x,float& y,float& z) {
   return M5.Imu.getAccel(&x,&y,&z);
 }
 
+void pollRemoteSerial(){
+  // Commands are local USB-only; transmission requires an explicit A press.
+  while(Serial.available()){
+    const char c=char(Serial.read());
+    if(c=='\n'||c=='\r'){
+      if(remoteLine.length()){
+        if(remoteLine=="LIST"){
+          Serial.printf("REMOTE ITEMS %u\n",unsigned(universalRemote.library.size()));
+          for(uint8_t i=0;i<universalRemote.library.size();i++){
+            const auto* item=universalRemote.library.at(i);
+            Serial.printf("%u|%s|%s|%u\n",unsigned(i),item->name,
+                          item->kind==signalremote::RF_RAW?"RF":"IR",unsigned(item->count));
+          }
+        }else {
+          const bool ok=universalRemote.library.importLine(remoteLine);
+          Serial.println(ok?"REMOTE OK":"REMOTE INVALID OR STORAGE FULL");
+        }
+        remoteLine="";
+      }
+    }else if(c>=32 && c<=126 && remoteLine.length()<1750)remoteLine+=c;
+    else if(remoteLine.length()>=1750)remoteLine="";
+  }
+}
 void setup() {
   auto cfg=M5.config();M5.begin(cfg);
   trailImuReady=M5.Imu.isEnabled();
   trailEcho.begin(); // Never formats flash: RAM fallback if SPIFFS is unavailable.
+  universalRemote.begin(); // Loads saved remotes; never formats flash.
 
   M5.Display.setRotation(0); M5.Display.setBrightness(STANDARD_BRIGHTNESS);
-  Serial.begin(921600); // host receiver must use identical baud
+  Serial.begin(921600); // also accepts IRRAW/RENAME/DELETE remote library commands
   BG=rgb(8,13,17);PANEL=rgb(24,41,34);RULE=rgb(43,57,58);
   RING=rgb(48,67,65);MUTED=rgb(125,145,147);UI_WHITE=rgb(238,244,239);
   LIME=rgb(173,255,112);AMBER=rgb(238,193,104);
@@ -860,7 +782,7 @@ void setup() {
   draw();
 }
 void loop() {
-  M5.update();pollHost();
+  M5.update();pollRemoteSerial();
   if(view==TRAIL_ECHO) {
     const bool wasRecording=trailEcho.recording();
     trailEcho.update(millis(),readTrailAccel);
@@ -870,7 +792,6 @@ void loop() {
     if(wasSending && !trailGpsLink.replaying()) trailSendNoticeUntil=millis()+4000;
     if(wasRecording && !trailEcho.recording())M5.Display.setBrightness(STANDARD_BRIGHTNESS);
   }
-  if(recording)streamPump();
   if(M5.BtnA.wasHold())enter(HOME);
   else if(M5.BtnA.wasClicked())onA();
   if(M5.BtnB.wasHold())onBHold();
@@ -883,7 +804,13 @@ void loop() {
       rfQuietWatch.feed(rfSampler.lastRssi(),now);
   }
   if(isBle(view)) {refreshBle();tickHistory();checkAlarm();}
-  if(view==SCOPE && now-lastFrame>=FRAME_MS)pollAudioScope();
+  if(view==REMOTE_CAPTURE) {
+    universalRemote.poll();
+    if(universalRemote.takeSaved()){
+      remoteSelection=universalRemote.library.size();
+      enter(REMOTE_DETAIL);
+    }
+  }
   if(now-lastFrame>=FRAME_MS) {lastFrame=now;draw();}
   delay(3);
 }

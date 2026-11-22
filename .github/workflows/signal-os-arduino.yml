@@ -35,6 +35,7 @@ jobs:
           set -euo pipefail
           arduino-cli lib install M5Unified M5GFX
           arduino-cli lib install 'NimBLE-Arduino@2.5.1'
+          arduino-cli lib install 'RadioLib@7.8.1'
       - name: Compile original M5StickC Plus sketch
         shell: bash
         run: |
